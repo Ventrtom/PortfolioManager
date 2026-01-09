@@ -10,9 +10,9 @@ Write-Host "Checking for backend processes..." -ForegroundColor Yellow
 $backend = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue
 if ($backend) {
     $backendPID = $backend.OwningProcess
-    Write-Host "  → Stopping backend (PID: $backendPID)..." -ForegroundColor Gray
+    Write-Host "  --> Stopping backend (PID: $backendPID)..." -ForegroundColor Gray
     Stop-Process -Id $backendPID -Force -ErrorAction SilentlyContinue
-    Write-Host "  ✓ Backend stopped" -ForegroundColor Green
+    Write-Host "  [OK] Backend stopped" -ForegroundColor Green
     $stopped = $true
 } else {
     Write-Host "  No backend process found" -ForegroundColor Gray
@@ -23,16 +23,16 @@ Write-Host "`nChecking for frontend processes..." -ForegroundColor Yellow
 $frontend = Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue
 if ($frontend) {
     $frontendPID = $frontend.OwningProcess
-    Write-Host "  → Stopping frontend (PID: $frontendPID)..." -ForegroundColor Gray
+    Write-Host "  --> Stopping frontend (PID: $frontendPID)..." -ForegroundColor Gray
     Stop-Process -Id $frontendPID -Force -ErrorAction SilentlyContinue
-    Write-Host "  ✓ Frontend stopped" -ForegroundColor Green
+    Write-Host "  [OK] Frontend stopped" -ForegroundColor Green
     $stopped = $true
 } else {
     Write-Host "  No frontend process found" -ForegroundColor Gray
 }
 
 if ($stopped) {
-    Write-Host "`n✓ All Portfolio Manager services stopped`n" -ForegroundColor Green
+    Write-Host "`n[OK] All Portfolio Manager services stopped`n" -ForegroundColor Green
 } else {
     Write-Host "`nNo running services found`n" -ForegroundColor Yellow
 }
