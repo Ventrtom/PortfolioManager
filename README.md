@@ -87,25 +87,60 @@ npm install
 
 ## Running the Application
 
-### Start the Backend (Terminal 1)
+### Quick Start (Recommended)
 
+The easiest way to start the application is using the startup script:
+
+**PowerShell (Recommended):**
+```powershell
+.\start.ps1
+```
+
+**Command Prompt / Batch:**
+```cmd
+start.bat
+```
+
+The startup script will:
+- ✓ Detect first-time setup and install dependencies automatically
+- ✓ Start both backend and frontend services
+- ✓ Perform health checks
+- ✓ Open the application in your browser
+- ✓ Handle graceful shutdown with Ctrl+C
+
+**To stop the services:**
+```powershell
+.\stop.ps1
+```
+Or simply press `Ctrl+C` in the startup script window.
+
+### Manual Start (Alternative)
+
+If you prefer to start services manually:
+
+**Terminal 1 - Backend:**
 ```bash
 cd backend
+# Windows
+venv\Scripts\activate
+# Mac/Linux
+source venv/bin/activate
+
 uvicorn main:app --reload
 ```
 
-The API will be available at `http://localhost:8000`
-- API docs: `http://localhost:8000/docs`
-- Health check: `http://localhost:8000/health`
-
-### Start the Frontend (Terminal 2)
-
+**Terminal 2 - Frontend:**
 ```bash
 cd frontend
 npm run dev
 ```
 
-The application will be available at `http://localhost:5173`
+### Access Points
+
+- **Frontend UI**: http://localhost:5173
+- **Backend API**: http://localhost:8000
+- **API Documentation**: http://localhost:8000/docs
+- **Health Check**: http://localhost:8000/health
 
 ## Usage
 
@@ -167,6 +202,9 @@ The Dashboard tab provides:
 
 ```
 PortfolioManager/
+├── start.ps1               # PowerShell startup script
+├── start.bat               # Batch startup script
+├── stop.ps1                # Stop all services
 ├── backend/
 │   ├── main.py                 # FastAPI app entry
 │   ├── requirements.txt
