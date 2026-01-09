@@ -7,6 +7,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Change to script directory (project root)
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+Set-Location $ScriptDir
+
 # Color functions for output
 function Write-Info { param($msg) Write-Host "[INFO] $msg" -ForegroundColor Cyan }
 function Write-Success { param($msg) Write-Host "  [OK] $msg" -ForegroundColor Green }
