@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 function Write-Info { param($msg) Write-Host "[INFO] $msg" -ForegroundColor Cyan }
 function Write-Success { param($msg) Write-Host "  [OK] $msg" -ForegroundColor Green }
 function Write-Progress { param($msg) Write-Host "  --> $msg" -ForegroundColor Yellow }
-function Write-ErrorMsgMsg { param($msg) Write-Host "[ERROR] $msg" -ForegroundColor Red }
+function Write-ErrorMsg { param($msg) Write-Host "[ERROR] $msg" -ForegroundColor Red }
 
 # Global variables for process management
 $script:BackendProcess = $null
