@@ -193,9 +193,15 @@ try {
                 break
             }
         } catch {
-            Start-Sleep -Seconds 1
-            $attempt++
+            # Also check if port is listening as fallback
+            $portCheck = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
+            if ($portCheck) {
+                $backendReady = $true
+                break
+            }
         }
+        Start-Sleep -Seconds 1
+        $attempt++
     }
 
     if (-not $backendReady) {
