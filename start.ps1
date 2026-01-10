@@ -170,12 +170,12 @@ if ($port5173InUse) {
 # Start backend
 Write-Progress "Starting backend API..."
 try {
-    Set-Location backend
-    $script:BackendProcess = Start-Process -FilePath ".\venv\Scripts\python.exe" `
+    $backendPath = Join-Path $PWD "backend"
+    $script:BackendProcess = Start-Process -FilePath "$backendPath\venv\Scripts\python.exe" `
         -ArgumentList "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000" `
+        -WorkingDirectory $backendPath `
         -PassThru `
         -WindowStyle Minimized
-    Set-Location ..
 
     # Give the process a moment to start
     Start-Sleep -Seconds 2
