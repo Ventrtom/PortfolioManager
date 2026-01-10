@@ -174,8 +174,11 @@ try {
     $script:BackendProcess = Start-Process -FilePath ".\venv\Scripts\python.exe" `
         -ArgumentList "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000" `
         -PassThru `
-        -WindowStyle Hidden
+        -WindowStyle Minimized
     Set-Location ..
+
+    # Give the process a moment to start
+    Start-Sleep -Seconds 2
 
     # Wait for backend to be ready
     $maxAttempts = 30
@@ -216,8 +219,11 @@ try {
     $script:FrontendProcess = Start-Process -FilePath "npm" `
         -ArgumentList "run", "dev" `
         -PassThru `
-        -WindowStyle Hidden
+        -WindowStyle Minimized
     Set-Location ..
+
+    # Give the process a moment to start
+    Start-Sleep -Seconds 2
 
     # Wait for frontend to be ready
     $maxAttempts = 30
