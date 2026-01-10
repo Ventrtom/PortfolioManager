@@ -60,13 +60,16 @@ class PortfolioService:
         # Build holdings list with current prices
         holdings = []
         for ticker, data in holdings_dict.items():
+            # IMPORTANT: Skip fully sold positions BEFORE fetching price
+            # This prevents infinite API retries for tickers that no longer have holdings
             if data['total_quantity'] <= 0:
-                continue  # Skip fully sold positions
+                logger.debug(f"Skipping {ticker} - no current holdings (quantity: {data['total_quantity']})")
+                continue
 
-            # Get current price
+            # Get current price only for active holdings
             current_price = MarketDataService.get_current_price(ticker, db)
             if not current_price:
-                logger.warning(f"Could not fetch price for {ticker}, skipping")
+                logger.warning(f"Could not fetch price for {ticker}, skipping from holdings")
                 continue
 
             # Get stock info

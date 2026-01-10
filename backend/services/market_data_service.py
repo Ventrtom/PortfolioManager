@@ -12,6 +12,10 @@ logger = logging.getLogger(__name__)
 class MarketDataService:
     """Service for fetching and caching stock market data"""
 
+    # Cache for failed tickers to prevent infinite retries
+    # Structure: {ticker: {'failed_at': datetime, 'attempts': int}}
+    _failed_ticker_cache: Dict[str, Dict] = {}
+
     @staticmethod
     def get_stock_info(ticker: str, db: Session) -> Optional[Dict]:
         """
@@ -19,12 +23,42 @@ class MarketDataService:
         Returns dict with company info or None if not found
         """
         try:
+            # Check if this ticker has failed recently
+            if ticker in MarketDataService._failed_ticker_cache:
+                failed_info = MarketDataService._failed_ticker_cache[ticker]
+                time_since_failure = datetime.utcnow() - failed_info['failed_at']
+                attempts = failed_info['attempts']
+                backoff_minutes = min(5 * (2 ** attempts), 60)
+
+                if time_since_failure.total_seconds() < backoff_minutes * 60:
+                    logger.debug(f"Skipping stock info for {ticker} - recently failed")
+                    # Return minimal data from cache if available
+                    stock = db.query(Stock).filter(Stock.ticker == ticker).first()
+                    if stock:
+                        return {
+                            "ticker": stock.ticker,
+                            "company_name": stock.company_name or ticker,
+                            "sector": stock.sector or "Unknown",
+                            "industry": stock.industry or "Unknown",
+                            "currency": stock.currency or "USD"
+                        }
+                    return {
+                        "ticker": ticker,
+                        "company_name": ticker,
+                        "sector": "Unknown",
+                        "industry": "Unknown",
+                        "currency": "USD"
+                    }
+
             # Check if we have cached data (less than 7 days old)
             stock = db.query(Stock).filter(Stock.ticker == ticker).first()
             if stock and stock.last_updated:
                 days_old = (datetime.utcnow() - stock.last_updated).days
                 if days_old < 7:
                     logger.info(f"Using cached data for {ticker}")
+                    # Clear from failed cache if we have valid cached data
+                    if ticker in MarketDataService._failed_ticker_cache:
+                        del MarketDataService._failed_ticker_cache[ticker]
                     return {
                         "ticker": stock.ticker,
                         "company_name": stock.company_name,
@@ -74,6 +108,17 @@ class MarketDataService:
 
         except Exception as e:
             logger.error(f"Error fetching stock info for {ticker}: {e}")
+
+            # Cache the failure
+            if ticker in MarketDataService._failed_ticker_cache:
+                MarketDataService._failed_ticker_cache[ticker]['attempts'] += 1
+                MarketDataService._failed_ticker_cache[ticker]['failed_at'] = datetime.utcnow()
+            else:
+                MarketDataService._failed_ticker_cache[ticker] = {
+                    'failed_at': datetime.utcnow(),
+                    'attempts': 1
+                }
+
             # Return minimal data if fetch fails
             return {
                 "ticker": ticker,
@@ -92,6 +137,19 @@ class MarketDataService:
         try:
             today = date.today()
 
+            # Check if this ticker has failed recently (within last hour)
+            if ticker in MarketDataService._failed_ticker_cache:
+                failed_info = MarketDataService._failed_ticker_cache[ticker]
+                time_since_failure = datetime.utcnow() - failed_info['failed_at']
+                attempts = failed_info['attempts']
+
+                # Exponential backoff: wait 5 min, 15 min, 30 min, 1 hour based on attempts
+                backoff_minutes = min(5 * (2 ** attempts), 60)
+
+                if time_since_failure.total_seconds() < backoff_minutes * 60:
+                    logger.debug(f"Skipping {ticker} - recently failed (attempt {attempts}, wait {backoff_minutes}m)")
+                    return None
+
             # Check if we have today's price cached
             price_record = db.query(StockPrice).filter(
                 StockPrice.ticker == ticker,
@@ -100,6 +158,9 @@ class MarketDataService:
 
             if price_record:
                 logger.info(f"Using cached price for {ticker}: ${price_record.price}")
+                # Clear from failed cache if we have a successful cached price
+                if ticker in MarketDataService._failed_ticker_cache:
+                    del MarketDataService._failed_ticker_cache[ticker]
                 return price_record.price
 
             # Fetch current price from yfinance
@@ -140,6 +201,18 @@ class MarketDataService:
 
         except Exception as e:
             logger.error(f"Error fetching price for {ticker}: {e}")
+
+            # Cache the failure to prevent immediate retries
+            if ticker in MarketDataService._failed_ticker_cache:
+                MarketDataService._failed_ticker_cache[ticker]['attempts'] += 1
+                MarketDataService._failed_ticker_cache[ticker]['failed_at'] = datetime.utcnow()
+            else:
+                MarketDataService._failed_ticker_cache[ticker] = {
+                    'failed_at': datetime.utcnow(),
+                    'attempts': 1
+                }
+
+            logger.info(f"Cached failure for {ticker} (attempt {MarketDataService._failed_ticker_cache[ticker]['attempts']})")
             return None
 
     @staticmethod
