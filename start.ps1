@@ -221,12 +221,12 @@ try {
 # Start frontend
 Write-Progress "Starting frontend..."
 try {
-    Set-Location frontend
-    $script:FrontendProcess = Start-Process -FilePath "npm" `
-        -ArgumentList "run", "dev" `
+    $frontendPath = Join-Path $PWD "frontend"
+    $script:FrontendProcess = Start-Process -FilePath "powershell.exe" `
+        -ArgumentList "-NoExit", "-Command", "cd '$frontendPath'; npm run dev" `
+        -WorkingDirectory $frontendPath `
         -PassThru `
         -WindowStyle Minimized
-    Set-Location ..
 
     # Give the process a moment to start
     Start-Sleep -Seconds 2
