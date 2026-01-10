@@ -25,6 +25,7 @@ class Transaction(Base):
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    version = Column(Integer, default=1, nullable=False)  # Optimistic locking
 
 
 class Stock(Base):
@@ -44,6 +45,28 @@ class StockPrice(Base):
     ticker = Column(String, primary_key=True, index=True)
     price = Column(Float, nullable=False)
     price_date = Column(Date, primary_key=True)
+
+
+class TransactionHistory(Base):
+    __tablename__ = "transaction_history"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    transaction_id = Column(Integer, index=True, nullable=False)
+
+    # Snapshot of transaction fields at time of change
+    transaction_type = Column(String, nullable=False)
+    ticker = Column(String, nullable=False, index=True)
+    quantity = Column(Float, nullable=True)
+    price = Column(Float, nullable=True)
+    total_amount = Column(Float, nullable=False)
+    transaction_date = Column(Date, nullable=False, index=True)
+    notes = Column(Text, nullable=True)
+
+    # Audit metadata
+    change_type = Column(String, nullable=False)  # 'CREATE', 'UPDATE', 'DELETE'
+    changed_by = Column(String, nullable=True)  # Future: user identification
+    changed_at = Column(DateTime, default=datetime.utcnow, index=True)
+    changed_fields = Column(Text, nullable=True)  # JSON string of changed fields
 
 
 # Database initialization

@@ -50,11 +50,29 @@ def update_transaction(
     transaction_update: TransactionUpdate,
     db: Session = Depends(get_db)
 ):
-    """Update an existing transaction"""
-    updated_transaction = TransactionService.update_transaction(db, transaction_id, transaction_update)
-    if not updated_transaction:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-    return updated_transaction
+    """Update an existing transaction with validation"""
+    from services.validation_service import ValidationError
+
+    try:
+        updated_transaction = TransactionService.update_transaction(
+            db, transaction_id, transaction_update
+        )
+        if not updated_transaction:
+            raise HTTPException(status_code=404, detail="Transaction not found")
+        return updated_transaction
+
+    except ValidationError as e:
+        # Return structured validation error
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": e.message,
+                "field": e.field,
+                "code": e.code
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 
 @router.delete("/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -83,3 +101,17 @@ def parse_transaction(input_text: str):
 def get_transaction_summary(db: Session = Depends(get_db)):
     """Get summary statistics about transactions"""
     return TransactionService.get_transaction_summary(db)
+
+
+@router.get("/{transaction_id}/history")
+def get_transaction_history(
+    transaction_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get audit history for a specific transaction"""
+    from services.audit_service import AuditService
+
+    history = AuditService.get_transaction_history(db, transaction_id)
+    if not history:
+        raise HTTPException(status_code=404, detail="No history found for this transaction")
+    return history

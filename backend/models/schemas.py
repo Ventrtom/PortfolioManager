@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from datetime import date, datetime
-from typing import Optional
+from typing import Optional, Dict, List
 
 
 # Transaction schemas
@@ -138,3 +138,37 @@ class ParsedTransaction(BaseModel):
     total_amount: float
     transaction_date: date
     raw_input: str
+
+
+# Validation schemas
+class ValidationErrorDetail(BaseModel):
+    field: Optional[str] = None
+    message: str
+    code: str
+    metadata: Optional[Dict] = None
+
+
+class ValidationResponse(BaseModel):
+    valid: bool
+    errors: List[ValidationErrorDetail] = []
+    warnings: List[ValidationErrorDetail] = []
+
+
+# Audit trail schemas
+class TransactionHistoryResponse(BaseModel):
+    id: int
+    transaction_id: int
+    transaction_type: str
+    ticker: str
+    quantity: Optional[float]
+    price: Optional[float]
+    total_amount: float
+    transaction_date: date
+    notes: Optional[str]
+    change_type: str
+    changed_by: Optional[str]
+    changed_at: datetime
+    changed_fields: Optional[str]
+
+    class Config:
+        from_attributes = True
