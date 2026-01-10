@@ -8,7 +8,7 @@ interface Props {
 
 const TransactionForm = ({ onSuccess }: Props) => {
   const [naturalLanguageInput, setNaturalLanguageInput] = useState('');
-  const [parsed Transaction, setParsedTransaction] = useState<ParsedTransaction | null>(null);
+  const [parsedTransaction, setParsedTransaction] = useState<ParsedTransaction | null>(null);
   const [formData, setFormData] = useState<TransactionCreate>({
     transaction_type: 'BUY',
     ticker: '',
