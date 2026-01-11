@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from models.database import get_db
 from models.schemas import (
@@ -14,10 +14,29 @@ router = APIRouter()
 @router.post("/", response_model=TransactionResponse, status_code=status.HTTP_201_CREATED)
 def create_transaction(
     transaction: TransactionCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     """Create a new transaction"""
     try:
+        # Auto-create stock if doesn't exist
+        from services.stock_service import StockService
+        from services.enrichment_service import EnrichmentService
+
+        ticker = transaction.ticker.upper()
+
+        # Create stock if new
+        stock = StockService.create_stock(ticker, db)
+
+        # If stock is new (pending status), trigger enrichment
+        if stock.enrichment_status == 'pending':
+            background_tasks.add_task(
+                EnrichmentService.enrich_stock,
+                ticker,
+                db
+            )
+
+        # Create transaction
         return TransactionService.create_transaction(db, transaction)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

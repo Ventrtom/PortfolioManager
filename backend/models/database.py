@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, Float, String, Date, DateTime, Text
+from sqlalchemy import create_engine, Column, Integer, Float, String, Date, DateTime, Text, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -37,6 +37,17 @@ class Stock(Base):
     industry = Column(String, nullable=True)
     currency = Column(String, default="USD")
     last_updated = Column(DateTime, nullable=True)
+
+    # Stock enrichment fields
+    market_cap = Column(Float, nullable=True)
+    volume = Column(Integer, nullable=True)
+    alternative_symbols = Column(Text, nullable=True)  # JSON array: ["GEO", "GEO:US"]
+    enrichment_status = Column(String, default='pending')  # 'pending', 'in_progress', 'complete', 'failed', 'manual'
+    enrichment_attempts = Column(Integer, default=0)
+    enrichment_error = Column(Text, nullable=True)
+    last_enrichment_attempt = Column(DateTime, nullable=True)
+    is_manually_edited = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class StockPrice(Base):

@@ -44,10 +44,33 @@ class StockBase(BaseModel):
     sector: Optional[str] = None
     industry: Optional[str] = None
     currency: str = "USD"
+    market_cap: Optional[float] = None
+    volume: Optional[int] = None
+
+
+class StockCreate(BaseModel):
+    ticker: str
+
+
+class StockUpdate(BaseModel):
+    company_name: Optional[str] = None
+    sector: Optional[str] = None
+    industry: Optional[str] = None
+    market_cap: Optional[float] = None
+    currency: Optional[str] = None
 
 
 class StockResponse(StockBase):
-    last_updated: Optional[datetime] = None
+    enrichment_status: str
+    enrichment_error: Optional[str] = None
+    is_manually_edited: bool
+    alternative_symbols: List[str] = []
+    last_updated: Optional[str] = None
+    # Portfolio context
+    holdings_quantity: float = 0
+    holdings_value: float = 0
+    cost_basis: float = 0
+    unrealized_gain: float = 0
 
     class Config:
         from_attributes = True

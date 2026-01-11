@@ -9,6 +9,8 @@ import type {
   SectorAllocation,
   PerformanceDataPoint,
   KPIResponse,
+  Stock,
+  StockFilterCriteria,
 } from '../types';
 
 const API_BASE_URL = 'http://localhost:8000/api';
@@ -98,6 +100,47 @@ export const analyticsAPI = {
 
   getKPIs: async (): Promise<KPIResponse> => {
     const response = await apiClient.get('/analytics/kpis');
+    return response.data;
+  },
+};
+
+// Stock API
+export const stockAPI = {
+  getAll: async (filters?: StockFilterCriteria): Promise<Stock[]> => {
+    const response = await apiClient.get('/stocks/', { params: filters });
+    return response.data;
+  },
+
+  getByTicker: async (ticker: string): Promise<Stock> => {
+    const response = await apiClient.get(`/stocks/${ticker}`);
+    return response.data;
+  },
+
+  create: async (ticker: string): Promise<Stock> => {
+    const response = await apiClient.post('/stocks/', { ticker });
+    return response.data;
+  },
+
+  update: async (ticker: string, updates: Partial<Stock>): Promise<Stock> => {
+    const response = await apiClient.put(`/stocks/${ticker}`, updates);
+    return response.data;
+  },
+
+  delete: async (ticker: string): Promise<void> => {
+    await apiClient.delete(`/stocks/${ticker}`);
+  },
+
+  triggerEnrichment: async (ticker: string): Promise<void> => {
+    await apiClient.post(`/stocks/${ticker}/enrich`);
+  },
+
+  getSectors: async (): Promise<string[]> => {
+    const response = await apiClient.get('/stocks/filters/sectors');
+    return response.data;
+  },
+
+  getIndustries: async (): Promise<string[]> => {
+    const response = await apiClient.get('/stocks/filters/industries');
     return response.data;
   },
 };

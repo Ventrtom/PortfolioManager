@@ -70,7 +70,21 @@ class FinancialCalculations:
 
         # Calculate daily returns
         prices_array = np.array(prices)
-        returns = np.diff(prices_array) / prices_array[:-1]
+
+        # Filter out zero and NaN values
+        valid_prices = prices_array[~np.isnan(prices_array) & (prices_array > 0)]
+
+        if len(valid_prices) < 2:
+            return {'daily_volatility': 0, 'annualized_volatility': 0}
+
+        # Calculate returns, filtering out invalid divisions
+        returns = np.diff(valid_prices) / valid_prices[:-1]
+
+        # Remove any NaN or infinite values from returns
+        returns = returns[np.isfinite(returns)]
+
+        if len(returns) < 2:
+            return {'daily_volatility': 0, 'annualized_volatility': 0}
 
         # Calculate standard deviation (volatility)
         daily_volatility = np.std(returns, ddof=1)
@@ -78,9 +92,13 @@ class FinancialCalculations:
         # Annualize (assuming 252 trading days)
         annualized_volatility = daily_volatility * np.sqrt(252)
 
+        # Ensure values are finite
+        daily_vol = float(daily_volatility) if np.isfinite(daily_volatility) else 0.0
+        annual_vol = float(annualized_volatility) if np.isfinite(annualized_volatility) else 0.0
+
         return {
-            'daily_volatility': float(daily_volatility),
-            'annualized_volatility': float(annualized_volatility)
+            'daily_volatility': daily_vol,
+            'annualized_volatility': annual_vol
         }
 
     @staticmethod
@@ -94,10 +112,17 @@ class FinancialCalculations:
             return 0
 
         returns_array = np.array(returns)
-        avg_return = np.mean(returns_array)
-        std_return = np.std(returns_array, ddof=1)
 
-        if std_return == 0:
+        # Filter out NaN and infinite values
+        valid_returns = returns_array[np.isfinite(returns_array)]
+
+        if len(valid_returns) < 2:
+            return 0
+
+        avg_return = np.mean(valid_returns)
+        std_return = np.std(valid_returns, ddof=1)
+
+        if std_return == 0 or not np.isfinite(std_return):
             return 0
 
         # Annualize assuming daily returns
@@ -106,7 +131,8 @@ class FinancialCalculations:
 
         sharpe_ratio = (annualized_return - risk_free_rate) / annualized_std
 
-        return float(sharpe_ratio)
+        # Ensure result is finite
+        return float(sharpe_ratio) if np.isfinite(sharpe_ratio) else 0.0
 
     @staticmethod
     def calculate_herfindahl_index(weights: List[float]) -> float:

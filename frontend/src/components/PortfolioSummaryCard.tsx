@@ -6,7 +6,7 @@ interface Props {
   kpis: KPIResponse | null;
 }
 
-const PortfolioSummaryCard = ({ summary, kpis }: Props) => {
+const PortfolioSummaryCard = ({ summary }: Props) => {
   return (
     <div className="summary-cards">
       <div className="summary-card">

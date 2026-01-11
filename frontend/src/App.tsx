@@ -3,9 +3,10 @@ import './App.css';
 import Dashboard from './components/Dashboard';
 import TransactionForm from './components/TransactionForm';
 import TransactionList from './components/TransactionList';
+import StockList from './components/StockList';
 
 function App() {
-  const [currentView, setCurrentView] = useState<'dashboard' | 'transactions'>('dashboard');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'transactions' | 'stocks'>('dashboard');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const handleTransactionSuccess = () => {
@@ -32,6 +33,12 @@ function App() {
           >
             Transactions
           </button>
+          <button
+            className={currentView === 'stocks' ? 'active' : ''}
+            onClick={() => setCurrentView('stocks')}
+          >
+            Stocks
+          </button>
         </div>
       </nav>
 
@@ -46,6 +53,8 @@ function App() {
             <TransactionList refreshTrigger={refreshTrigger} />
           </div>
         )}
+
+        {currentView === 'stocks' && <StockList />}
       </main>
 
       <footer className="footer">

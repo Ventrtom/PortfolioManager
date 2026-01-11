@@ -8,7 +8,23 @@
       "Bash(git remote add:*)",
       "Bash(git push:*)",
       "Bash(npm install)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(git -C \"c:\\\\Users\\\\t_ven\\\\Documents\\\\PortfolioManager\" log --oneline -10)",
+      "Bash(python test_migration.py:*)",
+      "Bash(python migrate_add_version.py:*)",
+      "Bash(python test_phase2.py:*)",
+      "Bash(python backend/migrate_add_stock_enrichment.py:*)",
+      "Bash(python:*)",
+      "Bash(pip install:*)",
+      "Bash(dir /O-D /B \"c:\\\\Users\\\\t_ven\\\\Documents\\\\PortfolioManager\")",
+      "Bash(findstr:*)",
+      "Bash(venv/Scripts/pip.exe install:*)",
+      "Bash(curl:*)",
+      "Bash(venv/Scripts/python.exe:*)",
+      "Bash(venv/Scripts/pip.exe list:*)",
+      "Bash(test:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npm run build:*)"
     ]
   }
 }

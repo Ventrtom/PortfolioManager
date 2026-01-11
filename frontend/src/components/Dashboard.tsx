@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { portfolioAPI, analyticsAPI } from '../api/client';
 import type { PortfolioSummary, Holding, IndustryAllocation, KPIResponse } from '../types';
-import { formatCurrency, formatPercent, getColorForValue } from '../utils/formatters';
+import { formatCurrency } from '../utils/formatters';
 import HoldingsTable from './HoldingsTable';
 import AllocationChart from './AllocationChart';
 import PortfolioSummaryCard from './PortfolioSummaryCard';

@@ -32,6 +32,43 @@ export interface ParsedTransaction {
   raw_input: string;
 }
 
+// Form validation and configuration types
+export const FieldState = {
+  PRISTINE: 'pristine',
+  TOUCHED: 'touched',
+  VALIDATING: 'validating',
+  VALID: 'valid',
+  INVALID: 'invalid',
+  WARNING: 'warning'
+} as const;
+
+export type FieldState = typeof FieldState[keyof typeof FieldState];
+
+export interface FieldValidation {
+  state: FieldState;
+  message?: string;
+  icon?: string;
+}
+
+export interface FieldConfig {
+  visible: boolean;
+  required: boolean;
+  label: string;
+  placeholder: string;
+  helpText?: string;
+  autoCalculated?: boolean;
+}
+
+export interface TransactionTypeConfig {
+  [fieldName: string]: FieldConfig;
+}
+
+export interface ValidationError {
+  field: string;
+  message: string;
+  code?: string;
+}
+
 // Portfolio types
 export interface Holding {
   ticker: string;
@@ -106,4 +143,33 @@ export interface KPIResponse {
   diversification: DiversificationMetrics;
   volatility: VolatilityMetrics;
   dividends: DividendSummary;
+}
+
+// Stock types
+export interface Stock {
+  ticker: string;
+  company_name: string | null;
+  sector: string | null;
+  industry: string | null;
+  currency: string;
+  market_cap: number | null;
+  volume: number | null;
+  enrichment_status: 'pending' | 'in_progress' | 'complete' | 'failed' | 'manual';
+  enrichment_error: string | null;
+  is_manually_edited: boolean;
+  alternative_symbols: string[];
+  last_updated: string | null;
+  // Portfolio context
+  holdings_quantity: number;
+  holdings_value: number;
+  cost_basis: number;
+  unrealized_gain: number;
+}
+
+export interface StockFilterCriteria {
+  search?: string;
+  sector?: string;
+  industry?: string;
+  status?: string;
+  has_holdings?: boolean;
 }
