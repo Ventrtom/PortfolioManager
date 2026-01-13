@@ -57,12 +57,29 @@ class TransactionService:
                 'czk': transaction.total_amount
             }
         else:
-            currency_amounts = ExchangeRateService.get_all_currency_amounts(
-                amount=transaction.total_amount,
-                transaction_currency=transaction.transaction_currency,
-                rate_date=transaction.transaction_date,
-                db=db
-            )
+            try:
+                currency_amounts = ExchangeRateService.get_all_currency_amounts(
+                    amount=transaction.total_amount,
+                    transaction_currency=transaction.transaction_currency,
+                    rate_date=transaction.transaction_date,
+                    db=db
+                )
+            except Exception as e:
+                # If exchange rate fetch fails (network issues, API down, etc.),
+                # store the transaction with only the original currency amount
+                # User can refresh rates later when network is available
+                logger.warning(f"Failed to fetch exchange rates: {e}")
+                logger.info("Saving transaction with partial currency data. You can refresh rates later using /api/transactions/refresh-currencies")
+
+                # Set the amount in the transaction currency only
+                currency_amounts = {'usd': None, 'eur': None, 'czk': None}
+                txn_curr = transaction.transaction_currency.upper()
+                if txn_curr == 'USD':
+                    currency_amounts['usd'] = transaction.total_amount
+                elif txn_curr == 'EUR':
+                    currency_amounts['eur'] = transaction.total_amount
+                elif txn_curr == 'CZK':
+                    currency_amounts['czk'] = transaction.total_amount
 
         db_transaction = Transaction(
             transaction_type=transaction.transaction_type.upper(),
@@ -197,16 +214,30 @@ class TransactionService:
         if needs_currency_recalc:
             from services.exchange_rate_service import ExchangeRateService
 
-            currency_amounts = ExchangeRateService.get_all_currency_amounts(
-                amount=db_transaction.total_amount,
-                transaction_currency=db_transaction.transaction_currency,
-                rate_date=db_transaction.transaction_date,
-                db=db
-            )
+            try:
+                currency_amounts = ExchangeRateService.get_all_currency_amounts(
+                    amount=db_transaction.total_amount,
+                    transaction_currency=db_transaction.transaction_currency,
+                    rate_date=db_transaction.transaction_date,
+                    db=db
+                )
 
-            db_transaction.amount_usd = currency_amounts['usd']
-            db_transaction.amount_eur = currency_amounts['eur']
-            db_transaction.amount_czk = currency_amounts['czk']
+                db_transaction.amount_usd = currency_amounts['usd']
+                db_transaction.amount_eur = currency_amounts['eur']
+                db_transaction.amount_czk = currency_amounts['czk']
+            except Exception as e:
+                # If exchange rate fetch fails, keep existing amounts or set partial data
+                logger.warning(f"Failed to fetch exchange rates for transaction update: {e}")
+                logger.info("Keeping existing currency amounts. You can refresh rates later using /api/transactions/refresh-currencies")
+
+                # Set amount only for the transaction currency
+                txn_curr = db_transaction.transaction_currency.upper()
+                if txn_curr == 'USD':
+                    db_transaction.amount_usd = db_transaction.total_amount
+                elif txn_curr == 'EUR':
+                    db_transaction.amount_eur = db_transaction.total_amount
+                elif txn_curr == 'CZK':
+                    db_transaction.amount_czk = db_transaction.total_amount
 
         db_transaction.updated_at = datetime.utcnow()
         db_transaction.version += 1  # Optimistic locking

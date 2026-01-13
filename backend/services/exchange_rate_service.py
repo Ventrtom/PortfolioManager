@@ -183,12 +183,14 @@ class ExchangeRateService:
                     break  # Success, exit retry loop
 
                 except requests.exceptions.RequestException as e:
+                    error_type = type(e).__name__
                     if attempt < max_retries - 1:
-                        print(f"Attempt {attempt + 1} failed for {base_currency} on {rate_date}: {e}")
-                        print(f"Retrying in {retry_delays[attempt]} seconds...")
+                        logger.warning(f"Attempt {attempt + 1} failed for {base_currency} on {rate_date}: {error_type} - {e}")
+                        logger.info(f"Retrying in {retry_delays[attempt]} seconds...")
                         time.sleep(retry_delays[attempt])
                     else:
-                        print(f"All attempts failed for {base_currency} on {rate_date}: {e}")
+                        logger.error(f"All attempts failed for {base_currency} on {rate_date}: {error_type} - {e}")
+                        logger.error(f"This likely indicates a network connectivity issue or the exchange rate API is unavailable")
                         ExchangeRateService._add_to_failed_cache(rate_date)
                         raise
 
@@ -285,7 +287,11 @@ class ExchangeRateService:
             if converted is None:
                 raise Exception(
                     f"Unable to fetch exchange rate for {transaction_currency}/{target_currency} on {rate_date}. "
-                    f"Please check your EXCHANGE_RATE_API_KEY and try again."
+                    f"This could be due to:\n"
+                    f"1. No internet connection or network issues\n"
+                    f"2. Exchange rate API is unavailable (exchangerate-api.io)\n"
+                    f"3. Invalid or missing EXCHANGE_RATE_API_KEY\n"
+                    f"Please check your network connection and API key, then try again."
                 )
 
             result[target_currency.lower()] = converted
