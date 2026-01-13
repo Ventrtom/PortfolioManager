@@ -400,6 +400,10 @@ const TransactionList = ({ refreshTrigger }: Props) => {
                         <option value="DIVIDEND">DIVIDEND</option>
                         <option value="FEE">FEE</option>
                         <option value="TAX">TAX</option>
+                        <option value="DEPOSIT">DEPOSIT</option>
+                        <option value="WITHDRAWAL">WITHDRAWAL</option>
+                        <option value="INTEREST">INTEREST</option>
+                        <option value="SPLIT">SPLIT</option>
                       </select>
                     ) : (
                       <span className={`type-badge type-${txn.transaction_type.toLowerCase()}`}>
