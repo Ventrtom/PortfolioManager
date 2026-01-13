@@ -457,6 +457,7 @@ class TransactionValidator:
             # Sign is handled automatically by TransactionService
             # Quantity and price should be 0 or None
             # (no validation needed - they're optional)
+            pass
 
         # SPLIT-specific validation
         if txn_type == 'SPLIT':
