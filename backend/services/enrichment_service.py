@@ -4,6 +4,7 @@ Orchestrates automatic data enrichment for stocks
 """
 import json
 import logging
+import os
 from datetime import datetime
 from typing import Optional, Dict
 from sqlalchemy.orm import Session
@@ -16,17 +17,21 @@ logger = logging.getLogger(__name__)
 # Initialize multi-provider service once
 multi_provider_service = MultiProviderDataService()
 
+# Check if AI Orchestrator should be used
+USE_AI_ORCHESTRATOR = os.environ.get('USE_AI_ORCHESTRATOR', 'true').lower() == 'true'
+
 class EnrichmentService:
     """Orchestrate stock data enrichment"""
 
     @staticmethod
     def enrich_stock(ticker: str, db: Session) -> Dict[str, any]:
         """
-        Enrich stock with data from yfinance + AI resolution
+        Enrich stock with data from yfinance + AI resolution.
+        Uses AI Orchestrator if enabled for intelligent data gap filling.
 
         Returns: {
             'success': bool,
-            'status': 'complete' | 'failed',
+            'status': 'complete' | 'failed' | 'partial' | 'manual',
             'data': dict or None,
             'error': str or None
         }
@@ -42,6 +47,99 @@ class EnrichmentService:
         stock.last_enrichment_attempt = datetime.utcnow()
         db.commit()
 
+        try:
+            # Try AI Orchestrator first if enabled
+            if USE_AI_ORCHESTRATOR:
+                logger.info(f"Using AI Orchestrator for enrichment of {ticker}")
+                from services.agents.ai_orchestrator import AIOrchestrator
+
+                orchestrator = AIOrchestrator()
+                result = orchestrator.enrich_stock_intelligent(ticker, db)
+
+                # Update stock record based on orchestrator result
+                if result.success:
+                    stock.company_name = result.company_name
+                    stock.sector = result.sector
+                    stock.industry = result.industry
+                    stock.currency = result.currency
+                    stock.market_cap = result.market_cap
+                    stock.volume = result.volume
+                    stock.last_updated = datetime.utcnow()
+
+                    # Store alternative symbols
+                    if result.alternative_symbols:
+                        stock.alternative_symbols = json.dumps(result.alternative_symbols)
+
+                    stock.enrichment_status = result.status  # 'complete' or 'partial'
+                    stock.enrichment_error = None
+                    db.commit()
+
+                    logger.info(
+                        f"AI Orchestrator enriched {ticker}: "
+                        f"status={result.status}, ai_used={result.ai_enrichment_used}"
+                    )
+
+                    return {
+                        'success': True,
+                        'status': result.status,
+                        'data': {
+                            'company_name': stock.company_name,
+                            'sector': stock.sector,
+                            'industry': stock.industry,
+                            'market_cap': stock.market_cap,
+                            'volume': stock.volume,
+                            'resolved_symbol': result.resolved_symbol,
+                            'method': result.resolution_method,
+                            'ai_enrichment_used': result.ai_enrichment_used,
+                            'ai_confidence': result.ai_confidence
+                        },
+                        'error': None
+                    }
+                elif result.needs_manual_review:
+                    stock.enrichment_status = 'manual'
+                    stock.enrichment_error = result.error
+                    db.commit()
+
+                    return {
+                        'success': False,
+                        'status': 'manual',
+                        'data': None,
+                        'error': result.error,
+                        'needs_manual_review': True
+                    }
+                else:
+                    stock.enrichment_status = 'failed'
+                    stock.enrichment_error = result.error
+                    db.commit()
+
+                    return {
+                        'success': False,
+                        'status': 'failed',
+                        'data': None,
+                        'error': result.error
+                    }
+
+            # Fallback to legacy enrichment if orchestrator disabled
+            logger.info(f"Using legacy enrichment for {ticker} (AI Orchestrator disabled)")
+            return EnrichmentService._legacy_enrich(ticker, stock, db)
+
+        except Exception as e:
+            logger.error(f"Enrichment failed for {ticker}: {e}")
+
+            stock.enrichment_status = 'failed'
+            stock.enrichment_error = str(e)
+            db.commit()
+
+            return {
+                'success': False,
+                'status': 'failed',
+                'data': None,
+                'error': str(e)
+            }
+
+    @staticmethod
+    def _legacy_enrich(ticker: str, stock: Stock, db: Session) -> Dict[str, any]:
+        """Legacy enrichment without AI Orchestrator"""
         try:
             # Step 1: Try ticker resolution
             resolution = TickerResolutionService.resolve_ticker(ticker)
