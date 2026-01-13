@@ -16,6 +16,9 @@ class TickerResolutionService:
     # Initialize Claude API client (lazy)
     _client: Optional[Anthropic] = None
 
+    # Cache for the best available model
+    _available_model: Optional[str] = None
+
     @classmethod
     def _get_client(cls) -> Anthropic:
         """Get or create Anthropic client"""
@@ -25,6 +28,48 @@ class TickerResolutionService:
                 raise ValueError("ANTHROPIC_API_KEY environment variable not set")
             cls._client = Anthropic(api_key=api_key)
         return cls._client
+
+    @classmethod
+    def _get_available_model(cls) -> str:
+        """
+        Get best available Claude model with fallback
+        Caches the result to avoid repeated API calls
+        Priority: opus-4.5 > sonnet-3.5 (latest) > haiku (fallback)
+        """
+        if cls._available_model:
+            return cls._available_model
+
+        models_to_try = [
+            "claude-opus-4-5-20251101",      # Latest, most capable (if available)
+            "claude-3-5-sonnet-20250219",    # Fast and capable
+            "claude-3-5-haiku-20241022",     # Cheaper fallback
+        ]
+
+        client = cls._get_client()
+
+        for model in models_to_try:
+            try:
+                # Test model availability with minimal call
+                client.messages.create(
+                    model=model,
+                    max_tokens=10,
+                    messages=[{"role": "user", "content": "test"}]
+                )
+                logger.info(f"Using Claude model for ticker resolution: {model}")
+                cls._available_model = model
+                return model
+            except Exception as e:
+                error_str = str(e)
+                if "404" in error_str or "not_found" in error_str:
+                    logger.warning(f"Model {model} not available, trying next...")
+                    continue
+                else:
+                    # Other error - might be rate limit, network issue, etc.
+                    logger.error(f"Error testing model {model}: {e}")
+                    # Still try the next model
+                    continue
+
+        raise ValueError(f"No available Claude models found. Tried: {models_to_try}")
 
     @staticmethod
     def generate_ticker_variations(ticker: str) -> List[str]:
@@ -90,8 +135,10 @@ If you cannot determine the ticker with reasonable confidence, respond with:
     "reasoning": "Could not identify this ticker"
 }}"""
 
+            # Use dynamic model selection with fallback
+            model = cls._get_available_model()
             response = client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model=model,
                 max_tokens=500,
                 messages=[{"role": "user", "content": prompt}]
             )
