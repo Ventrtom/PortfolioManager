@@ -51,3 +51,18 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# Logs and test output
+*.log
+*_output.txt
+*_test_results.json
+console_output.txt
+
+# Data files
+*.csv
+*.xlsx
+
+# Backup files
+*.backup
+*_original.py
+*.old
