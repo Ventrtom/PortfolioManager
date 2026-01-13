@@ -3,6 +3,7 @@ Stock Management Routes
 """
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
+from datetime import datetime
 from models.database import get_db
 from models.schemas import StockResponse, StockCreate, StockUpdate
 from services.stock_service import StockService
