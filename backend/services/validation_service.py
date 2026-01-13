@@ -360,7 +360,7 @@ class TransactionValidator:
             })
 
         # Warn if large quantity change (>50%)
-        if original.quantity and effective['quantity']:
+        if original.quantity and original.quantity > 0 and effective['quantity']:
             change_pct = abs(effective['quantity'] - original.quantity) / original.quantity
             if change_pct > 0.5:
                 warnings.append({
