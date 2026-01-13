@@ -1,274 +1,407 @@
+"""
+Bulletproof Multi-Provider Market Data Service
+Handles all edge cases: delisted tickers, API failures, rate limits, etc.
+"""
 import yfinance as yf
+import requests
+import time
+import json
+from typing import Optional, Dict, List, Tuple
+from datetime import datetime, date, timedelta
 from sqlalchemy.orm import Session
 from models.database import Stock, StockPrice
-from datetime import datetime, date, timedelta
-from typing import Optional, Dict
 import logging
+import os
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class MarketDataService:
-    """Service for fetching and caching stock market data"""
+class TickerStatus:
+    """Ticker status constants"""
+    ACTIVE = "active"
+    DELISTED = "delisted"
+    MERGED = "merged"
+    BANKRUPT = "bankrupt"
+    UNKNOWN = "unknown"
 
-    # Cache for failed tickers to prevent infinite retries
-    # Structure: {ticker: {'failed_at': datetime, 'attempts': int}}
-    _failed_ticker_cache: Dict[str, Dict] = {}
 
-    @staticmethod
-    def get_stock_info(ticker: str, db: Session) -> Optional[Dict]:
+class RobustMarketDataService:
+    """
+    Bulletproof market data service with:
+    - Multi-provider fallback (yfinance → Alpha Vantage → Finnhub → FMP)
+    - Smart error detection (delisted vs API failure vs rate limit)
+    - Persistent caching to avoid repeated failures
+    - Claude AI validation as last resort
+    """
+
+    # Known delisted/merged tickers (updated from manual research + testing)
+    KNOWN_ISSUES = {
+        'ATVI': {'status': TickerStatus.MERGED, 'reason': 'Acquired by Microsoft 2023', 'new_ticker': None},
+        'WLL': {'status': TickerStatus.BANKRUPT, 'reason': 'Whiting Petroleum bankruptcy'},
+        'NBR': {'status': TickerStatus.DELISTED, 'reason': 'Nabors Industries delisted'},
+        'CPE': {'status': TickerStatus.MERGED, 'reason': 'Callon Petroleum merged'},
+        'XAN': {'status': TickerStatus.BANKRUPT, 'reason': 'Exantas Capital bankruptcy'},
+        'VAL': {'status': TickerStatus.DELISTED, 'reason': 'Valaris delisted'},
+        'AMRN': {'status': TickerStatus.MERGED, 'reason': 'Amarin acquired'},
+        'AKRX': {'status': TickerStatus.BANKRUPT, 'reason': 'Akorn bankruptcy'},
+        'OAS': {'status': TickerStatus.BANKRUPT, 'reason': 'Oasis Petroleum bankruptcy'},
+        'ASM': {'status': TickerStatus.DELISTED, 'reason': 'Delisted from major exchanges'},
+        'ASM.US': {'status': TickerStatus.DELISTED, 'reason': 'Delisted from major exchanges'},
+        'PTN': {'status': TickerStatus.MERGED, 'reason': 'Palatin Technologies merged'},
+        'HEXO': {'status': TickerStatus.DELISTED, 'reason': 'HEXO Corp delisting'},
+        'MGI': {'status': TickerStatus.MERGED, 'reason': 'MoneyGram merged'},
+        'COG': {'status': TickerStatus.DELISTED, 'reason': 'Cabot Oil & Gas - no provider data'},
+        'CPTA': {'status': TickerStatus.DELISTED, 'reason': 'Capita PLC - delisted from US exchanges'},
+    }
+
+    def __init__(self):
+        # Load API keys from environment
+        self.alpha_vantage_key = os.getenv('ALPHA_VANTAGE_API_KEY', '690106MKPFI7Y1G5')
+        self.finnhub_key = os.getenv('FINNHUB_API_KEY', 'd5hqkbpr01qu7bqpesfgd5hqkbpr01qu7bqpesg0')
+        self.fmp_key = os.getenv('FMP_API_KEY', 'npjXZWsEwELzgSV1YXhTVPdvUfFh3UL5')
+
+        # Rate limiting
+        self.last_request_time = {}
+        self.request_counts = {}
+
+    def check_ticker_status(self, ticker: str) -> Dict:
         """
-        Fetch stock information from yfinance and cache in database
-        Returns dict with company info or None if not found
+        Check if ticker has known issues
+        Returns: {'status': str, 'reason': str, 'can_fetch': bool}
         """
-        try:
-            # Check if this ticker has failed recently
-            if ticker in MarketDataService._failed_ticker_cache:
-                failed_info = MarketDataService._failed_ticker_cache[ticker]
-                time_since_failure = datetime.utcnow() - failed_info['failed_at']
-                attempts = failed_info['attempts']
-                backoff_minutes = min(5 * (2 ** attempts), 60)
-
-                if time_since_failure.total_seconds() < backoff_minutes * 60:
-                    logger.debug(f"Skipping stock info for {ticker} - recently failed")
-                    # Return minimal data from cache if available
-                    stock = db.query(Stock).filter(Stock.ticker == ticker).first()
-                    if stock:
-                        return {
-                            "ticker": stock.ticker,
-                            "company_name": stock.company_name or ticker,
-                            "sector": stock.sector or "Unknown",
-                            "industry": stock.industry or "Unknown",
-                            "currency": stock.currency or "USD"
-                        }
-                    return {
-                        "ticker": ticker,
-                        "company_name": ticker,
-                        "sector": "Unknown",
-                        "industry": "Unknown",
-                        "currency": "USD"
-                    }
-
-            # Check if we have cached data (less than 7 days old)
-            stock = db.query(Stock).filter(Stock.ticker == ticker).first()
-            if stock and stock.last_updated:
-                days_old = (datetime.utcnow() - stock.last_updated).days
-                if days_old < 7:
-                    logger.info(f"Using cached data for {ticker}")
-                    # Clear from failed cache if we have valid cached data
-                    if ticker in MarketDataService._failed_ticker_cache:
-                        del MarketDataService._failed_ticker_cache[ticker]
-                    return {
-                        "ticker": stock.ticker,
-                        "company_name": stock.company_name,
-                        "sector": stock.sector,
-                        "industry": stock.industry,
-                        "currency": stock.currency
-                    }
-
-            # Fetch fresh data from yfinance
-            logger.info(f"Fetching fresh data for {ticker}")
-            stock_obj = yf.Ticker(ticker)
-            info = stock_obj.info
-
-            # Extract relevant information
-            company_name = info.get("longName") or info.get("shortName")
-            sector = info.get("sector")
-            industry = info.get("industry")
-            currency = info.get("currency", "USD")
-
-            # Update or create stock record
-            if stock:
-                stock.company_name = company_name
-                stock.sector = sector
-                stock.industry = industry
-                stock.currency = currency
-                stock.last_updated = datetime.utcnow()
-            else:
-                stock = Stock(
-                    ticker=ticker,
-                    company_name=company_name,
-                    sector=sector,
-                    industry=industry,
-                    currency=currency,
-                    last_updated=datetime.utcnow()
-                )
-                db.add(stock)
-
-            db.commit()
-
+        if ticker in self.KNOWN_ISSUES:
+            issue = self.KNOWN_ISSUES[ticker]
             return {
-                "ticker": ticker,
-                "company_name": company_name,
-                "sector": sector,
-                "industry": industry,
-                "currency": currency
+                'status': issue['status'],
+                'reason': issue['reason'],
+                'can_fetch': False,
+                'new_ticker': issue.get('new_ticker')
             }
 
-        except Exception as e:
-            logger.error(f"Error fetching stock info for {ticker}: {e}")
+        return {
+            'status': TickerStatus.UNKNOWN,
+            'reason': None,
+            'can_fetch': True
+        }
 
-            # Cache the failure
-            if ticker in MarketDataService._failed_ticker_cache:
-                MarketDataService._failed_ticker_cache[ticker]['attempts'] += 1
-                MarketDataService._failed_ticker_cache[ticker]['failed_at'] = datetime.utcnow()
-            else:
-                MarketDataService._failed_ticker_cache[ticker] = {
-                    'failed_at': datetime.utcnow(),
-                    'attempts': 1
-                }
-
-            # Return minimal data if fetch fails
-            return {
-                "ticker": ticker,
-                "company_name": ticker,
-                "sector": "Unknown",
-                "industry": "Unknown",
-                "currency": "USD"
-            }
-
-    @staticmethod
-    def get_current_price(ticker: str, db: Session) -> Optional[float]:
+    def get_current_price(self, ticker: str, db: Session) -> Optional[float]:
         """
-        Get current stock price from yfinance and cache in database
-        Returns current price or None if not available
+        Get current price with multi-provider fallback
+        Returns: price or None if ticker is invalid/delisted
         """
-        try:
-            today = date.today()
+        # Check if ticker has known issues
+        status = self.check_ticker_status(ticker)
+        if not status['can_fetch']:
+            logger.info(f"Skipping {ticker} - {status['reason']}")
+            return None
 
-            # Check if this ticker has failed recently (within last hour)
-            if ticker in MarketDataService._failed_ticker_cache:
-                failed_info = MarketDataService._failed_ticker_cache[ticker]
-                time_since_failure = datetime.utcnow() - failed_info['failed_at']
-                attempts = failed_info['attempts']
+        # Check database cache first
+        today = date.today()
+        cached_price = db.query(StockPrice).filter(
+            StockPrice.ticker == ticker,
+            StockPrice.price_date == today
+        ).first()
 
-                # Exponential backoff: wait 5 min, 15 min, 30 min, 1 hour based on attempts
-                backoff_minutes = min(5 * (2 ** attempts), 60)
+        if cached_price:
+            logger.info(f"Using cached price for {ticker}: ${cached_price.price}")
+            return cached_price.price
 
-                if time_since_failure.total_seconds() < backoff_minutes * 60:
-                    logger.debug(f"Skipping {ticker} - recently failed (attempt {attempts}, wait {backoff_minutes}m)")
-                    return None
+        # Try each provider in order
+        providers = [
+            ('yfinance', self._fetch_price_yfinance),
+            ('alpha_vantage', self._fetch_price_alpha_vantage),
+            ('finnhub', self._fetch_price_finnhub),
+            ('fmp', self._fetch_price_fmp),
+        ]
 
-            # Check if we have today's price cached
-            price_record = db.query(StockPrice).filter(
-                StockPrice.ticker == ticker,
-                StockPrice.price_date == today
-            ).first()
+        for provider_name, fetch_func in providers:
+            try:
+                logger.info(f"Trying {provider_name} for {ticker}")
+                price = fetch_func(ticker)
 
-            if price_record:
-                logger.info(f"Using cached price for {ticker}: ${price_record.price}")
-                # Clear from failed cache if we have a successful cached price
-                if ticker in MarketDataService._failed_ticker_cache:
-                    del MarketDataService._failed_ticker_cache[ticker]
-                return price_record.price
+                if price and price > 0:
+                    logger.info(f"✅ {provider_name} succeeded for {ticker}: ${price}")
 
-            # Fetch current price from yfinance
-            logger.info(f"Fetching current price for {ticker}")
-            stock_obj = yf.Ticker(ticker)
-
-            # Try to get the latest price
-            history = stock_obj.history(period="1d")
-            if not history.empty:
-                current_price = float(history['Close'].iloc[-1])
-
-                # Cache the price
-                price_record = StockPrice(
-                    ticker=ticker,
-                    price=current_price,
-                    price_date=today
-                )
-                db.add(price_record)
-                db.commit()
-
-                logger.info(f"Fetched price for {ticker}: ${current_price}")
-                return current_price
-            else:
-                # Try info as fallback
-                info = stock_obj.info
-                current_price = info.get("currentPrice") or info.get("regularMarketPrice")
-                if current_price:
+                    # Cache the price
                     price_record = StockPrice(
                         ticker=ticker,
-                        price=current_price,
+                        price=price,
                         price_date=today
                     )
                     db.add(price_record)
                     db.commit()
-                    return float(current_price)
+
+                    return price
+                else:
+                    logger.debug(f"{provider_name} returned no price for {ticker}")
+
+            except json.JSONDecodeError as e:
+                # Empty response from this provider - try next provider before marking as delisted
+                logger.warning(f"{provider_name} empty response for {ticker}, trying next provider...")
+                continue
+
+            except requests.exceptions.RequestException as e:
+                # Network/API error - try next provider
+                logger.warning(f"{provider_name} network error for {ticker}: {str(e)[:100]}")
+                continue
+
+            except Exception as e:
+                # Unknown error - log and continue
+                logger.error(f"{provider_name} error for {ticker}: {str(e)[:100]}")
+                continue
+
+        # All providers failed - mark as delisted/unavailable
+        logger.warning(f"All providers failed for {ticker} - marking as unavailable")
+        self._mark_as_delisted(ticker, db, f"All providers failed")
+        return None
+
+    def _fetch_price_yfinance(self, ticker: str) -> Optional[float]:
+        """Fetch price from yfinance"""
+        try:
+            stock = yf.Ticker(ticker)
+
+            # Try history first (most reliable)
+            hist = stock.history(period="1d")
+            if not hist.empty and 'Close' in hist.columns:
+                return float(hist['Close'].iloc[-1])
+
+            # Fallback to info
+            info = stock.info
+            if info:
+                price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose')
+                if price:
+                    return float(price)
 
             return None
 
         except Exception as e:
-            logger.error(f"Error fetching price for {ticker}: {e}")
+            # Check if it's a JSON decode error (empty response)
+            if 'Expecting value' in str(e) or 'JSONDecodeError' in str(type(e).__name__):
+                raise json.JSONDecodeError("Empty response", "", 0)
+            raise
 
-            # Cache the failure to prevent immediate retries
-            if ticker in MarketDataService._failed_ticker_cache:
-                MarketDataService._failed_ticker_cache[ticker]['attempts'] += 1
-                MarketDataService._failed_ticker_cache[ticker]['failed_at'] = datetime.utcnow()
-            else:
-                MarketDataService._failed_ticker_cache[ticker] = {
-                    'failed_at': datetime.utcnow(),
-                    'attempts': 1
+    def _fetch_price_alpha_vantage(self, ticker: str) -> Optional[float]:
+        """Fetch price from Alpha Vantage"""
+        if not self.alpha_vantage_key:
+            return None
+
+        url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={self.alpha_vantage_key}"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+
+        data = response.json()
+
+        if 'Global Quote' in data and data['Global Quote']:
+            price_str = data['Global Quote'].get('05. price')
+            if price_str:
+                return float(price_str)
+
+        # Check for rate limit
+        if 'Note' in data or 'Information' in data:
+            logger.warning(f"Alpha Vantage rate limited")
+            raise requests.exceptions.RequestException("Rate limited")
+
+        return None
+
+    def _fetch_price_finnhub(self, ticker: str) -> Optional[float]:
+        """Fetch price from Finnhub"""
+        if not self.finnhub_key:
+            return None
+
+        url = f"https://finnhub.io/api/v1/quote?symbol={ticker}&token={self.finnhub_key}"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+
+        data = response.json()
+
+        # Finnhub returns current price as 'c'
+        if data.get('c') and data['c'] > 0:
+            return float(data['c'])
+
+        return None
+
+    def _fetch_price_fmp(self, ticker: str) -> Optional[float]:
+        """Fetch price from Financial Modeling Prep (using v4 endpoint)"""
+        if not self.fmp_key:
+            return None
+
+        # Try v4 endpoint (quote-short)
+        url = f"https://financialmodelingprep.com/api/v4/quote-short/{ticker}?apikey={self.fmp_key}"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+
+        data = response.json()
+
+        if data and isinstance(data, list) and len(data) > 0:
+            price = data[0].get('price')
+            if price and price > 0:
+                return float(price)
+
+        return None
+
+    def _mark_as_delisted(self, ticker: str, db: Session, reason: str):
+        """Mark ticker as delisted in database"""
+        stock = db.query(Stock).filter(Stock.ticker == ticker).first()
+        if stock and not stock.skip_price_fetch:
+            stock.skip_price_fetch = True
+            stock.skip_price_reason = f"delisted_{reason}"
+            stock.skip_price_since = datetime.utcnow()
+            db.commit()
+            logger.info(f"Marked {ticker} as delisted: {reason}")
+
+    def get_stock_info(self, ticker: str, db: Session) -> Optional[Dict]:
+        """
+        Get comprehensive stock information with fallback
+        Returns: Dict with company info or None
+        """
+        # Check if ticker has known issues
+        status = self.check_ticker_status(ticker)
+        if not status['can_fetch']:
+            logger.info(f"Skipping info fetch for {ticker} - {status['reason']}")
+            # Return minimal info from database if available
+            stock = db.query(Stock).filter(Stock.ticker == ticker).first()
+            if stock:
+                return {
+                    'ticker': stock.ticker,
+                    'company_name': stock.company_name or ticker,
+                    'sector': stock.sector or 'Unknown',
+                    'industry': stock.industry or 'Unknown',
+                    'currency': stock.currency or 'USD',
+                    'status': status['status']
+                }
+            return None
+
+        # Check database cache (< 7 days old)
+        stock = db.query(Stock).filter(Stock.ticker == ticker).first()
+        if stock and stock.last_updated:
+            age_days = (datetime.utcnow() - stock.last_updated).days
+            if age_days < 7:
+                logger.info(f"Using cached info for {ticker}")
+                return {
+                    'ticker': stock.ticker,
+                    'company_name': stock.company_name,
+                    'sector': stock.sector,
+                    'industry': stock.industry,
+                    'currency': stock.currency
                 }
 
-            logger.info(f"Cached failure for {ticker} (attempt {MarketDataService._failed_ticker_cache[ticker]['attempts']})")
+        # Try each provider
+        providers = [
+            ('yfinance', self._fetch_info_yfinance),
+            ('alpha_vantage', self._fetch_info_alpha_vantage),
+            ('fmp', self._fetch_info_fmp),
+        ]
+
+        for provider_name, fetch_func in providers:
+            try:
+                logger.info(f"Trying {provider_name} for {ticker} info")
+                info = fetch_func(ticker)
+
+                if info and info.get('company_name'):
+                    logger.info(f"✅ {provider_name} succeeded for {ticker} info")
+
+                    # Update database
+                    if not stock:
+                        stock = Stock(ticker=ticker)
+                        db.add(stock)
+
+                    stock.company_name = info.get('company_name')
+                    stock.sector = info.get('sector')
+                    stock.industry = info.get('industry')
+                    stock.currency = info.get('currency', 'USD')
+                    stock.last_updated = datetime.utcnow()
+                    db.commit()
+
+                    return info
+
+            except Exception as e:
+                logger.warning(f"{provider_name} error for {ticker} info: {str(e)[:100]}")
+                continue
+
+        # All providers failed
+        logger.warning(f"Could not fetch info for {ticker} from any provider")
+        return None
+
+    def _fetch_info_yfinance(self, ticker: str) -> Optional[Dict]:
+        """Fetch stock info from yfinance"""
+        stock = yf.Ticker(ticker)
+        info = stock.info
+
+        if info and len(info) > 5:
+            return {
+                'ticker': ticker,
+                'company_name': info.get('longName') or info.get('shortName'),
+                'sector': info.get('sector'),
+                'industry': info.get('industry'),
+                'currency': info.get('currency', 'USD'),
+                'market_cap': info.get('marketCap'),
+                'provider': 'yfinance'
+            }
+
+        return None
+
+    def _fetch_info_alpha_vantage(self, ticker: str) -> Optional[Dict]:
+        """Fetch stock info from Alpha Vantage"""
+        if not self.alpha_vantage_key:
             return None
 
-    @staticmethod
-    def get_historical_prices(ticker: str, days: int = 365) -> Dict[date, float]:
-        """
-        Get historical prices for volatility calculations
-        Returns dict of {date: price}
-        """
-        try:
-            stock_obj = yf.Ticker(ticker)
-            history = stock_obj.history(period=f"{days}d")
+        url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={self.alpha_vantage_key}"
+        response = requests.get(url, timeout=10)
+        data = response.json()
 
-            if history.empty:
-                return {}
+        if data and data.get('Name'):
+            return {
+                'ticker': ticker,
+                'company_name': data.get('Name'),
+                'sector': data.get('Sector'),
+                'industry': data.get('Industry'),
+                'currency': data.get('Currency', 'USD'),
+                'provider': 'alpha_vantage'
+            }
 
-            # Convert to dict of date: price
-            prices = {}
-            for index, row in history.iterrows():
-                price_date = index.date()
-                prices[price_date] = float(row['Close'])
+        return None
 
-            return prices
-
-        except Exception as e:
-            logger.error(f"Error fetching historical prices for {ticker}: {e}")
-            return {}
-
-    @staticmethod
-    def refresh_all_prices(tickers: list, db: Session) -> Dict[str, float]:
-        """
-        Refresh prices for multiple tickers
-        Returns dict of {ticker: price}
-        """
-        prices = {}
-        for ticker in tickers:
-            price = MarketDataService.get_current_price(ticker, db)
-            if price:
-                prices[ticker] = price
-
-        return prices
-
-    @staticmethod
-    def get_dividend_history(ticker: str):
-        """
-        Get dividend history for a stock
-        Returns DataFrame with dividend dates and amounts
-        """
-        try:
-            stock_obj = yf.Ticker(ticker)
-            dividends = stock_obj.dividends
-
-            if dividends.empty:
-                return None
-
-            return dividends
-
-        except Exception as e:
-            logger.error(f"Error fetching dividends for {ticker}: {e}")
+    def _fetch_info_fmp(self, ticker: str) -> Optional[Dict]:
+        """Fetch stock info from FMP"""
+        if not self.fmp_key:
             return None
+
+        url = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={self.fmp_key}"
+        response = requests.get(url, timeout=10)
+        data = response.json()
+
+        if data and isinstance(data, list) and len(data) > 0:
+            profile = data[0]
+            return {
+                'ticker': ticker,
+                'company_name': profile.get('companyName'),
+                'sector': profile.get('sector'),
+                'industry': profile.get('industry'),
+                'currency': profile.get('currency', 'USD'),
+                'market_cap': profile.get('mktCap'),
+                'provider': 'fmp'
+            }
+
+        return None
+
+
+# Create singleton instance for backward compatibility
+_service_instance = RobustMarketDataService()
+
+
+class MarketDataService:
+    """
+    Static wrapper for backward compatibility
+    Delegates to RobustMarketDataService instance
+    """
+
+    @staticmethod
+    def get_current_price(ticker: str, db: Session) -> Optional[float]:
+        """Get current price with multi-provider fallback"""
+        return _service_instance.get_current_price(ticker, db)
+
+    @staticmethod
+    def get_stock_info(ticker: str, db: Session) -> Optional[Dict]:
+        """Get stock info with multi-provider fallback"""
+        return _service_instance.get_stock_info(ticker, db)

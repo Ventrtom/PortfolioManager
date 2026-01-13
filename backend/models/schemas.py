@@ -1,21 +1,44 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from datetime import date, datetime
 from typing import Optional, Dict, List
 
 
 # Transaction schemas
 class TransactionBase(BaseModel):
-    transaction_type: str = Field(..., description="BUY, SELL, DIVIDEND, FEE, TAX")
-    ticker: str
+    transaction_type: str = Field(..., description="BUY, SELL, DIVIDEND, FEE, TAX, DEPOSIT, WITHDRAWAL, INTEREST, SPLIT")
+    ticker: Optional[str] = Field(default='', description="Stock ticker (empty for DEPOSIT/WITHDRAWAL/INTEREST)")
     quantity: Optional[float] = None
     price: Optional[float] = None
     total_amount: float
+    transaction_currency: str = Field(default="CZK", description="USD, EUR, or CZK")
     transaction_date: date
     notes: Optional[str] = None
 
+    @validator('transaction_type')
+    def validate_transaction_type(cls, v):
+        valid_types = ['BUY', 'SELL', 'DIVIDEND', 'FEE', 'TAX', 'DEPOSIT', 'WITHDRAWAL', 'INTEREST', 'SPLIT']
+        if v and v.upper() not in valid_types:
+            raise ValueError(f'Transaction type must be one of: {", ".join(valid_types)}')
+        return v.upper() if v else None
+
+    @validator('transaction_currency')
+    def validate_currency(cls, v):
+        if v and v.upper() not in ['USD', 'EUR', 'CZK']:
+            raise ValueError('Currency must be USD, EUR, or CZK')
+        return v.upper() if v else 'CZK'
+
 
 class TransactionCreate(TransactionBase):
-    pass
+    # Migration/import flags to bypass validation
+    skip_cash_validation: bool = Field(default=False, description="Skip cash balance validation (for migrations only)")
+    skip_fifo_validation: bool = Field(default=False, description="Skip FIFO holdings validation (for migrations only)")
+    skip_price_validation: bool = Field(default=False, description="Skip price validation (for migrations only)")
+    skip_exchange_rate_conversion: bool = Field(default=False, description="Skip multi-currency conversion (for migrations with pre-converted amounts)")
+
+    # Import tracking fields
+    import_source: Optional[str] = Field(default=None, description="Source of import (e.g., 'broker_csv_import')")
+    import_batch_id: Optional[str] = Field(default=None, description="Batch ID for grouped imports")
+    broker_transaction_id: Optional[str] = Field(default=None, description="Original broker transaction ID")
 
 
 class TransactionUpdate(BaseModel):
@@ -24,12 +47,16 @@ class TransactionUpdate(BaseModel):
     quantity: Optional[float] = None
     price: Optional[float] = None
     total_amount: Optional[float] = None
+    transaction_currency: Optional[str] = None
     transaction_date: Optional[date] = None
     notes: Optional[str] = None
 
 
 class TransactionResponse(TransactionBase):
     id: int
+    amount_usd: Optional[float] = None
+    amount_eur: Optional[float] = None
+    amount_czk: Optional[float] = None
     created_at: datetime
     updated_at: datetime
 
@@ -71,6 +98,11 @@ class StockResponse(StockBase):
     holdings_value: float = 0
     cost_basis: float = 0
     unrealized_gain: float = 0
+    # Price fetch skip flags
+    skip_price_fetch: bool = False
+    skip_price_reason: Optional[str] = None
+    skip_price_since: Optional[datetime] = None
+    consecutive_failures: int = 0
 
     class Config:
         from_attributes = True
@@ -99,6 +131,8 @@ class PortfolioSummary(BaseModel):
     total_realized_gain: float
     cash_balance: float
     number_of_holdings: int
+    currency: str = "CZK"  # Base currency for all values
+    conversion_warnings: Optional[List[str]] = None  # Exchange rate warnings
 
 
 class IndustryAllocation(BaseModel):
@@ -136,6 +170,9 @@ class VolatilityMetrics(BaseModel):
     daily_volatility: float
     annualized_volatility: float
     sharpe_ratio: Optional[float] = None
+    data_frequency: Optional[str] = None  # 'daily', 'weekly', 'monthly', 'unknown'
+    data_quality: Optional[str] = None  # 'high', 'medium', 'low', 'insufficient'
+    warnings: Optional[List[str]] = None  # Calculation warnings
 
 
 class DividendSummary(BaseModel):
@@ -150,6 +187,32 @@ class KPIResponse(BaseModel):
     diversification: DiversificationMetrics
     volatility: VolatilityMetrics
     dividends: DividendSummary
+    warnings: Optional[List[str]] = None  # Aggregated warnings from all KPIs
+    errors: Optional[List[str]] = None  # Aggregated errors
+
+
+class SnapshotMetadata(BaseModel):
+    calculated_at: datetime
+    calculation_duration_ms: Optional[int] = None
+
+
+class KPIResponseWithMetadata(KPIResponse):
+    metadata: SnapshotMetadata
+
+
+class SnapshotHistoryItem(BaseModel):
+    id: int
+    calculated_at: datetime
+    total_value: float
+    unrealized_gain: float
+    unrealized_gain_percent: float
+    daily_volatility: Optional[float]
+    annualized_volatility: Optional[float]
+    sharpe_ratio: Optional[float]
+    dividend_yield: float
+
+    class Config:
+        from_attributes = True
 
 
 # Parser schema
@@ -195,3 +258,14 @@ class TransactionHistoryResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# Currency refresh schemas
+class CurrencyRefreshRequest(BaseModel):
+    transaction_ids: Optional[List[int]] = None  # None = refresh all
+
+
+class CurrencyRefreshResponse(BaseModel):
+    updated: int
+    failed: int
+    errors: List[str] = []

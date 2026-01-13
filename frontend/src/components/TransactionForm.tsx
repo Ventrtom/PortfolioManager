@@ -1,12 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
 import { transactionAPI } from '../api/client';
 import { FieldState } from '../types';
-import type { TransactionCreate, ParsedTransaction, FieldValidation, ValidationError } from '../types';
+import type { TransactionCreate, ParsedTransaction, FieldValidation, ValidationError, Transaction } from '../types';
 import { validateAllFields } from '../utils/validation';
 import { useAutoCalculation } from '../hooks/useAutoCalculation';
 import { getVisibleFields } from '../config/transactionFormConfig';
 import NaturalLanguageInput from './transaction-form/NaturalLanguageInput';
 import ManualEntryForm from './transaction-form/ManualEntryForm';
+import MultiCurrencyDisplay from './shared/MultiCurrencyDisplay';
 
 interface Props {
   onSuccess: () => void;
@@ -29,6 +30,7 @@ const TransactionForm = ({ onSuccess }: Props) => {
     quantity: 0,
     price: 0,
     total_amount: 0,
+    transaction_currency: 'CZK', // Default to CZK
     transaction_date: new Date().toISOString().split('T')[0],
     notes: '',
   });
@@ -43,6 +45,7 @@ const TransactionForm = ({ onSuccess }: Props) => {
   // General state
   const [error, setError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [savedTransaction, setSavedTransaction] = useState<Transaction | null>(null);
 
   // Track previous transaction type for type change detection
   const previousType = useRef<string>(formData.transaction_type || 'BUY');
@@ -216,7 +219,22 @@ const TransactionForm = ({ onSuccess }: Props) => {
 
     try {
       setError(null);
-      await transactionAPI.create(formData as TransactionCreate);
+
+      // Prepare transaction data
+      let transactionToSubmit = { ...formData } as TransactionCreate;
+
+      // Handle cash-only transaction types (no ticker)
+      if (['DEPOSIT', 'WITHDRAWAL', 'FEE', 'TAX', 'INTEREST'].includes(formData.transaction_type || '')) {
+        transactionToSubmit.ticker = '';  // Empty ticker for cash transactions
+      }
+
+      // Always send positive amount - backend applies correct sign based on type
+      transactionToSubmit.total_amount = Math.abs(transactionToSubmit.total_amount);
+
+      const createdTransaction = await transactionAPI.create(transactionToSubmit);
+
+      // Save transaction to show currency breakdown
+      setSavedTransaction(createdTransaction);
 
       // Show success message
       setSubmitSuccess(true);
@@ -227,9 +245,27 @@ const TransactionForm = ({ onSuccess }: Props) => {
       // Wait a bit then reset form
       setTimeout(() => {
         resetForm();
-      }, 1500);
+      }, 2500);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to create transaction');
+      // Parse structured validation errors from backend
+      if (err.response?.data?.detail) {
+        const detail = err.response.data.detail;
+
+        if (typeof detail === 'object' && detail.code === 'INSUFFICIENT_CASH') {
+          setError(
+            `❌ ${detail.message}\n\n` +
+            `Tip: Add a DEPOSIT transaction to increase your available cash balance.`
+          );
+        } else if (typeof detail === 'object' && detail.message) {
+          setError(detail.message);
+        } else if (typeof detail === 'string') {
+          setError(detail);
+        } else {
+          setError('Failed to create transaction. Please check your inputs.');
+        }
+      } else {
+        setError(err.message || 'An unexpected error occurred.');
+      }
 
       // Try to parse backend validation errors
       if (err.response?.data?.errors) {
@@ -246,6 +282,7 @@ const TransactionForm = ({ onSuccess }: Props) => {
       quantity: 0,
       price: 0,
       total_amount: 0,
+      transaction_currency: 'CZK',
       transaction_date: new Date().toISOString().split('T')[0],
       notes: '',
     });
@@ -258,6 +295,7 @@ const TransactionForm = ({ onSuccess }: Props) => {
     setManuallyEditedFields(new Set());
     setError(null);
     setSubmitSuccess(false);
+    setSavedTransaction(null);
     previousType.current = 'BUY';
   };
 
@@ -289,10 +327,13 @@ const TransactionForm = ({ onSuccess }: Props) => {
         </div>
       )}
 
-      {submitSuccess && (
+      {submitSuccess && savedTransaction && (
         <div className="success-banner" role="alert">
           <span className="success-banner__icon">✅</span>
-          <strong>Transaction added successfully!</strong>
+          <div>
+            <strong>Transaction added successfully!</strong>
+            <MultiCurrencyDisplay transaction={savedTransaction} mode="all" />
+          </div>
         </div>
       )}
 

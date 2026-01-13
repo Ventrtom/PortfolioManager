@@ -1,6 +1,7 @@
 import React from 'react';
-import type { TransactionCreate, FieldValidation, ValidationError } from '../../types';
+import type { TransactionCreate, FieldValidation, ValidationError, Currency } from '../../types';
 import DynamicFormFields from './DynamicFormFields';
+import CurrencySelector from '../shared/CurrencySelector';
 
 interface ManualEntryFormProps {
   formData: Partial<TransactionCreate>;
@@ -80,6 +81,17 @@ const ManualEntryForm: React.FC<ManualEntryFormProps> = ({
           <option value="FEE">FEE</option>
           <option value="TAX">TAX</option>
         </select>
+      </div>
+
+      <div className="form-group">
+        <label htmlFor="transaction-currency">
+          Currency
+          <span className="form-field__badge form-field__badge--required">Required</span>
+        </label>
+        <CurrencySelector
+          value={formData.transaction_currency || 'CZK'}
+          onChange={(currency: Currency) => onFieldChange('transaction_currency', currency)}
+        />
       </div>
 
       <DynamicFormFields

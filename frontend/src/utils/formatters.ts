@@ -1,5 +1,5 @@
 // Currency formatter
-export const formatCurrency = (value: number, currency: string = 'USD'): string => {
+export const formatCurrency = (value: number, currency: string = 'CZK'): string => {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: currency,

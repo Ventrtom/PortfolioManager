@@ -151,20 +151,61 @@ if (-not (Test-Path "frontend\node_modules")) {
 # Check ports
 Write-Info "Starting services..."
 
-# Check if port 8000 is in use
+# First, clean up any stale backend processes
+$backendPythonProcesses = Get-Process -Name python -ErrorAction SilentlyContinue | Where-Object {
+    $_.Path -like "*PortfolioManager\backend\venv*"
+}
+if ($backendPythonProcesses) {
+    Write-Progress "Cleaning up existing backend processes..."
+    foreach ($proc in $backendPythonProcesses) {
+        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Seconds 2
+}
+
+# Check if port 8000 is in use by an active process
 $port8000InUse = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue
 if ($port8000InUse) {
-    Write-ErrorMsg "Port 8000 is already in use!"
-    Write-Host "Please stop the existing service or change the port in backend/main.py" -ForegroundColor Yellow
-    exit 1
+    $port8000PID = $port8000InUse.OwningProcess
+    $processExists = Get-Process -Id $port8000PID -ErrorAction SilentlyContinue
+
+    if ($processExists) {
+        Write-ErrorMsg "Port 8000 is already in use by process $port8000PID!"
+        Write-Host "Process: $($processExists.ProcessName) - $($processExists.Path)" -ForegroundColor Yellow
+        Write-Host "Run the stop script first: .\stop.ps1" -ForegroundColor Yellow
+        exit 1
+    } else {
+        Write-Progress "Port 8000 has stale connection, waiting for it to clear..."
+        Start-Sleep -Seconds 3
+        $port8000InUse = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue
+        if ($port8000InUse) {
+            Write-ErrorMsg "Port 8000 still not available (stale connection)"
+            Write-Host "This is a Windows TCP/IP issue. Try waiting 30 seconds or run: netsh int ip reset" -ForegroundColor Yellow
+            exit 1
+        }
+    }
 }
 
 # Check if port 5173 is in use
 $port5173InUse = Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue
 if ($port5173InUse) {
-    Write-ErrorMsg "Port 5173 is already in use!"
-    Write-Host "Please stop the existing service" -ForegroundColor Yellow
-    exit 1
+    $port5173PID = $port5173InUse.OwningProcess
+    $processExists = Get-Process -Id $port5173PID -ErrorAction SilentlyContinue
+
+    if ($processExists) {
+        Write-ErrorMsg "Port 5173 is already in use by process $port5173PID!"
+        Write-Host "Process: $($processExists.ProcessName)" -ForegroundColor Yellow
+        Write-Host "Run the stop script first: .\stop.ps1" -ForegroundColor Yellow
+        exit 1
+    } else {
+        Write-Progress "Port 5173 has stale connection, waiting for it to clear..."
+        Start-Sleep -Seconds 3
+        $port5173InUse = Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue
+        if ($port5173InUse) {
+            Write-ErrorMsg "Port 5173 still not available"
+            exit 1
+        }
+    }
 }
 
 # Start backend

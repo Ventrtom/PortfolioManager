@@ -81,7 +81,7 @@ export const validateTransactionEdit = (
 
   // Transaction type validation
   if (data.transaction_type !== undefined) {
-    const validTypes = ['BUY', 'SELL', 'DIVIDEND', 'FEE', 'TAX'];
+    const validTypes = ['BUY', 'SELL', 'DIVIDEND', 'FEE', 'TAX', 'DEPOSIT', 'WITHDRAWAL'];
     if (!validTypes.includes(data.transaction_type.toUpperCase())) {
       errors.push('Invalid transaction type');
     }
@@ -132,8 +132,8 @@ export const validateField = (
 const validateTicker = (value: any, formData: Partial<TransactionCreate>): FieldValidation => {
   const transactionType = formData.transaction_type?.toUpperCase();
 
-  // Ticker is optional for FEE and TAX
-  if (transactionType === 'FEE' || transactionType === 'TAX') {
+  // Ticker is optional for DEPOSIT, WITHDRAWAL, FEE and TAX
+  if (['DEPOSIT', 'WITHDRAWAL', 'FEE', 'TAX'].includes(transactionType || '')) {
     if (!value || value.trim() === '') {
       return { state: FieldState.VALID, message: 'Optional - defaults to CASH', icon: '' };
     }
@@ -164,8 +164,8 @@ const validateTicker = (value: any, formData: Partial<TransactionCreate>): Field
 const validateQuantity = (value: any, formData: Partial<TransactionCreate>): FieldValidation => {
   const transactionType = formData.transaction_type?.toUpperCase();
 
-  // Quantity not needed for DIVIDEND, FEE, TAX
-  if (transactionType === 'DIVIDEND' || transactionType === 'FEE' || transactionType === 'TAX') {
+  // Quantity not needed for DIVIDEND, FEE, TAX, DEPOSIT, WITHDRAWAL
+  if (['DIVIDEND', 'FEE', 'TAX', 'DEPOSIT', 'WITHDRAWAL'].includes(transactionType || '')) {
     return { state: FieldState.PRISTINE };
   }
 
@@ -193,8 +193,8 @@ const validateQuantity = (value: any, formData: Partial<TransactionCreate>): Fie
 const validatePrice = (value: any, formData: Partial<TransactionCreate>): FieldValidation => {
   const transactionType = formData.transaction_type?.toUpperCase();
 
-  // Price not needed for DIVIDEND, FEE, TAX
-  if (transactionType === 'DIVIDEND' || transactionType === 'FEE' || transactionType === 'TAX') {
+  // Price not needed for DIVIDEND, FEE, TAX, DEPOSIT, WITHDRAWAL
+  if (['DIVIDEND', 'FEE', 'TAX', 'DEPOSIT', 'WITHDRAWAL'].includes(transactionType || '')) {
     return { state: FieldState.PRISTINE };
   }
 
@@ -236,16 +236,19 @@ const validateTotalAmount = (value: any, formData: Partial<TransactionCreate>): 
 
   const transactionType = formData.transaction_type?.toUpperCase();
 
-  // Warning if sign doesn't match typical convention
-  if (transactionType === 'BUY' || transactionType === 'DIVIDEND') {
-    if (numValue < 0) {
-      return { state: FieldState.WARNING, message: 'Amount is usually positive for this type', icon: '⚠️' };
+  // DEPOSIT and DIVIDEND must be positive
+  if (['DEPOSIT', 'DIVIDEND'].includes(transactionType || '')) {
+    if (numValue <= 0) {
+      return { state: FieldState.INVALID, message: `${transactionType} amount must be positive`, icon: '❌' };
     }
   }
 
-  if (transactionType === 'SELL' || transactionType === 'FEE' || transactionType === 'TAX') {
-    if (numValue > 0) {
-      return { state: FieldState.WARNING, message: 'Amount is usually negative for this type', icon: '⚠️' };
+  // All transaction types: users enter POSITIVE amounts
+  // Backend converts money-out types (BUY, FEE, TAX, WITHDRAWAL) to negative
+  // Money-in types (SELL, DIVIDEND, DEPOSIT, INTEREST) stay positive
+  if (['BUY', 'SELL', 'FEE', 'TAX', 'WITHDRAWAL'].includes(transactionType || '')) {
+    if (numValue <= 0) {
+      return { state: FieldState.INVALID, message: `${transactionType} amount must be positive`, icon: '❌' };
     }
   }
 
@@ -287,7 +290,7 @@ const validateDate = (value: any): FieldValidation => {
  * Validate transaction_type field
  */
 const validateTransactionType = (value: any): FieldValidation => {
-  const validTypes = ['BUY', 'SELL', 'DIVIDEND', 'FEE', 'TAX'];
+  const validTypes = ['BUY', 'SELL', 'DIVIDEND', 'FEE', 'TAX', 'DEPOSIT', 'WITHDRAWAL'];
 
   if (!value) {
     return { state: FieldState.INVALID, message: 'Transaction type is required', icon: '❌' };

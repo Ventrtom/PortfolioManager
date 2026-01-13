@@ -1,0 +1,59 @@
+.currency-display {
+  font-weight: 500;
+}
+
+.multi-currency-display {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.primary-amount {
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--color-text-primary, #fff);
+}
+
+.secondary-amount {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary, #aaa);
+  font-weight: 400;
+}
+
+.multi-currency-display-all {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: var(--color-bg-secondary, #2a2a2a);
+  border-radius: 6px;
+  border: 1px solid var(--color-border, #444);
+}
+
+.currency-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.currency-label {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary, #aaa);
+  font-weight: 500;
+  min-width: 3rem;
+}
+
+.currency-value {
+  font-size: 1rem;
+  color: var(--color-text-primary, #fff);
+  font-weight: 600;
+  text-align: right;
+}
+
+/* Success banner styling */
+.success-banner .multi-currency-display-all {
+  margin-top: 0.75rem;
+  background: rgba(76, 175, 80, 0.1);
+  border-color: rgba(76, 175, 80, 0.3);
+}

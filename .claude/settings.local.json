@@ -24,7 +24,26 @@
       "Bash(venv/Scripts/pip.exe list:*)",
       "Bash(test:*)",
       "Bash(npm run dev:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(ls:*)",
+      "Bash(timeout 5 python:*)",
+      "Bash(sqlite3:*)",
+      "Bash(timeout:*)",
+      "Bash(if [ -f .env ])",
+      "Bash(then echo \"exists\")",
+      "Bash(else echo \"missing\")",
+      "Bash(fi)",
+      "Bash(Get-Content:*)",
+      "Bash(tee:*)",
+      "Bash(python3:*)",
+      "Bash(tasklist:*)",
+      "Bash(netstat:*)",
+      "Bash(ping:*)",
+      "Bash(Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue)",
+      "Bash(Select-Object State, OwningProcess, LocalAddress, LocalPort)",
+      "Bash(Format-Table -AutoSize)",
+      "Bash(powershell -Command:*)",
+      "Bash(powershell:*)"
     ]
   }
 }

@@ -217,6 +217,182 @@ export const TRANSACTION_FIELD_CONFIGS: Record<string, TransactionTypeConfig> = 
       placeholder: 'Optional description of the tax',
       helpText: 'Describe the tax type: dividend withholding, foreign tax, capital gains tax, wash sale adjustment, etc.'
     }
+  },
+  DEPOSIT: {
+    ticker: {
+      visible: false,
+      required: false,
+      label: '',
+      placeholder: '',
+      helpText: ''
+    },
+    quantity: {
+      visible: false,
+      required: false,
+      label: '',
+      placeholder: '',
+      helpText: ''
+    },
+    price: {
+      visible: false,
+      required: false,
+      label: '',
+      placeholder: '',
+      helpText: ''
+    },
+    total_amount: {
+      visible: true,
+      required: true,
+      label: 'Deposit Amount',
+      placeholder: 'e.g., 10000.00',
+      helpText: 'Enter the amount you are depositing into your portfolio. This adds cash available for buying stocks.'
+    },
+    transaction_date: {
+      visible: true,
+      required: true,
+      label: 'Deposit Date',
+      placeholder: 'Select date',
+      helpText: 'Select the date when you deposited cash into your investment account.'
+    },
+    notes: {
+      visible: true,
+      required: false,
+      label: 'Notes',
+      placeholder: 'Optional notes (e.g., "Initial deposit from savings")',
+      helpText: 'Add context about the source of funds or purpose.'
+    }
+  },
+  WITHDRAWAL: {
+    ticker: {
+      visible: false,
+      required: false,
+      label: '',
+      placeholder: '',
+      helpText: ''
+    },
+    quantity: {
+      visible: false,
+      required: false,
+      label: '',
+      placeholder: '',
+      helpText: ''
+    },
+    price: {
+      visible: false,
+      required: false,
+      label: '',
+      placeholder: '',
+      helpText: ''
+    },
+    total_amount: {
+      visible: true,
+      required: true,
+      label: 'Withdrawal Amount',
+      placeholder: 'e.g., 5000.00',
+      helpText: 'Enter the amount you are withdrawing. Enter as a positive number (e.g., 5000 for $5,000). The system will store it as negative automatically.'
+    },
+    transaction_date: {
+      visible: true,
+      required: true,
+      label: 'Withdrawal Date',
+      placeholder: 'Select date',
+      helpText: 'Select the date when you withdrew cash from your investment account.'
+    },
+    notes: {
+      visible: true,
+      required: false,
+      label: 'Notes',
+      placeholder: 'Optional notes (e.g., "Personal expense")',
+      helpText: 'Add context about the purpose of withdrawal.'
+    }
+  },
+  INTEREST: {
+    ticker: {
+      visible: false,
+      required: false,
+      label: '',
+      placeholder: '',
+      helpText: ''
+    },
+    quantity: {
+      visible: false,
+      required: false,
+      label: '',
+      placeholder: '',
+      helpText: ''
+    },
+    price: {
+      visible: false,
+      required: false,
+      label: '',
+      placeholder: '',
+      helpText: ''
+    },
+    total_amount: {
+      visible: true,
+      required: true,
+      label: 'Interest Amount',
+      placeholder: 'e.g., 15.50',
+      helpText: 'Enter the interest earned on your cash balance. This is typically shown as "Free-funds Interest" on broker statements.'
+    },
+    transaction_date: {
+      visible: true,
+      required: true,
+      label: 'Interest Date',
+      placeholder: 'Select date',
+      helpText: 'Select the date when interest was credited to your account.'
+    },
+    notes: {
+      visible: true,
+      required: false,
+      label: 'Notes',
+      placeholder: 'Optional notes (e.g., "Monthly interest")',
+      helpText: 'Add any relevant information about the interest payment period or rate.'
+    }
+  },
+  SPLIT: {
+    ticker: {
+      visible: true,
+      required: true,
+      label: 'Stock Symbol',
+      placeholder: 'e.g., AAPL, TSLA',
+      helpText: 'Enter the stock ticker symbol that underwent a split or reverse split.'
+    },
+    quantity: {
+      visible: true,
+      required: true,
+      label: 'Net Shares Change',
+      placeholder: 'e.g., 150 for 2:1 split',
+      helpText: 'Enter the NET change in shares. For a 2:1 split where you had 100 shares, enter 100 (you now have 200 total). For reverse splits, enter negative (e.g., -75 for 1:4 reverse split).'
+    },
+    price: {
+      visible: false,
+      required: false,
+      label: '',
+      placeholder: '',
+      helpText: ''
+    },
+    total_amount: {
+      visible: true,
+      required: false,
+      label: 'Cash Adjustment',
+      placeholder: 'e.g., 0.00 or fractional share value',
+      helpText: 'Cash received or paid for fractional shares (usually 0). Some brokers pay cash in lieu of fractional shares.'
+    },
+    transaction_date: {
+      visible: true,
+      required: true,
+      label: 'Split Date',
+      placeholder: 'Select date',
+      helpText: 'Select the effective date of the stock split (when it was executed).'
+    },
+    notes: {
+      visible: true,
+      required: true,
+      label: 'Split Details',
+      placeholder: 'e.g., "2:1 stock split" or "1:4 reverse split"',
+      helpText: 'REQUIRED: Document the split ratio (e.g., "2-for-1 split", "1-for-4 reverse split"). This is critical for tracking.'
+    }
   }
 };
 

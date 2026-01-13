@@ -1,10 +1,12 @@
 from sqlalchemy.orm import Session
-from models.database import Transaction
+from models.database import Transaction, Stock
 from models.schemas import Holding, PortfolioSummary, IndustryAllocation, SectorAllocation
 from services.market_data_service import MarketDataService
-from utils.calculations import FinancialCalculations
+from services.exchange_rate_service import CurrencyNormalizer
+from utils.calculations import FinancialCalculations, RealizedGainsCalculator
 from typing import List, Dict
 from collections import defaultdict
+from datetime import date
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -75,6 +77,14 @@ class PortfolioService:
             # Get stock info
             stock_info = MarketDataService.get_stock_info(ticker, db)
 
+            # Handle case where stock info is unavailable
+            if stock_info is None:
+                stock_info = {
+                    'company_name': ticker,
+                    'sector': None,
+                    'industry': None
+                }
+
             # Calculate metrics
             quantity = data['total_quantity']
             cost_basis = data['total_cost']
@@ -103,47 +113,102 @@ class PortfolioService:
     @staticmethod
     def get_portfolio_summary(db: Session) -> PortfolioSummary:
         """
-        Calculate portfolio summary statistics
+        Calculate portfolio summary with currency normalization and realized gains.
+        All values in CZK base currency.
         """
         holdings = PortfolioService.calculate_holdings(db)
+        all_warnings = []
+        today = date.today()
 
-        # Calculate totals
-        total_value = sum(h.market_value for h in holdings)
-        total_cost_basis = sum(h.cost_basis for h in holdings)
-        total_unrealized_gain = sum(h.unrealized_gain for h in holdings)
+        # CRITICAL FIX: Normalize all holdings to CZK
+        total_value_czk = 0
+        total_cost_basis_czk = 0
+
+        for holding in holdings:
+            # Get stock currency
+            stock = db.query(Stock).filter(Stock.ticker == holding.ticker).first()
+            stock_currency = stock.currency if stock else 'USD'
+
+            # Convert market value to CZK
+            market_value_czk = CurrencyNormalizer.to_base_currency(
+                holding.market_value,
+                stock_currency,
+                today,
+                db
+            )
+
+            # Convert cost basis to CZK
+            cost_basis_czk = CurrencyNormalizer.to_base_currency(
+                holding.cost_basis,
+                stock_currency,
+                today,
+                db
+            )
+
+            if market_value_czk is None:
+                all_warnings.append(f"Failed to convert market value for {holding.ticker} ({stock_currency} to CZK)")
+                market_value_czk = 0
+
+            if cost_basis_czk is None:
+                all_warnings.append(f"Failed to convert cost basis for {holding.ticker} ({stock_currency} to CZK)")
+                cost_basis_czk = 0
+
+            total_value_czk += market_value_czk
+            total_cost_basis_czk += cost_basis_czk
+
+        # Calculate unrealized gain
+        total_unrealized_gain_czk = total_value_czk - total_cost_basis_czk
         total_unrealized_gain_percent = (
-            (total_unrealized_gain / total_cost_basis * 100) if total_cost_basis > 0 else 0
+            (total_unrealized_gain_czk / total_cost_basis_czk * 100) if total_cost_basis_czk > 0 else 0
         )
 
-        # Calculate realized gains from SELL transactions
-        sell_transactions = db.query(Transaction).filter(
-            Transaction.transaction_type == 'SELL'
-        ).all()
+        # CRITICAL FIX: Calculate realized gains using FIFO
+        try:
+            total_realized_gain_czk = RealizedGainsCalculator.calculate_total_realized_gains(db)
+        except KeyError as e:
+            logger.error(f"Failed to calculate realized gains - missing field: {e}")
+            all_warnings.append(f"Realized gains calculation failed: missing required field {str(e)}")
+            total_realized_gain_czk = 0
+        except ValueError as e:
+            logger.error(f"Failed to calculate realized gains - invalid data: {e}")
+            all_warnings.append(f"Realized gains calculation failed: {str(e)}")
+            total_realized_gain_czk = 0
+        except Exception as e:
+            logger.error(f"Failed to calculate realized gains: {e}", exc_info=True)
+            all_warnings.append(f"Realized gains calculation failed: {str(e)}")
+            total_realized_gain_czk = 0
 
-        total_realized_gain = 0
-        # This is simplified - in real scenario, we'd need to match sells with buys
-        # For now, just sum up the differences
-        for sell in sell_transactions:
-            if sell.price and sell.quantity:
-                # We'd need to look up the cost basis for the sold shares
-                # For simplicity, we'll calculate this later with more detailed tracking
-                pass
-
-        # Calculate cash balance from fees, dividends, etc.
+        # Calculate cash balance (all transaction types affecting cash)
         cash_transactions = db.query(Transaction).filter(
-            Transaction.transaction_type.in_(['DIVIDEND', 'FEE', 'TAX'])
-        ).all()
+            Transaction.transaction_type.in_(['DEPOSIT', 'WITHDRAWAL', 'BUY', 'SELL', 'DIVIDEND', 'FEE', 'TAX'])
+        ).order_by(Transaction.transaction_date.asc(), Transaction.id.asc()).all()
 
-        cash_balance = sum(t.total_amount for t in cash_transactions)
+        cash_balance_czk = 0
+        for txn in cash_transactions:
+            try:
+                normalized = CurrencyNormalizer.normalize_transaction(txn, db)
+
+                # With semantic sign convention, just add all amounts:
+                # - Negative transactions (BUY, FEE, TAX, WITHDRAWAL) reduce balance
+                # - Positive transactions (SELL, DIVIDEND, DEPOSIT, INTEREST) increase balance
+                cash_balance_czk += normalized['amount_czk']
+
+                if normalized['conversion_warning']:
+                    all_warnings.append(normalized['conversion_warning'])
+            except Exception as e:
+                logger.warning(f"Failed to normalize transaction {txn.id}: {e}")
+                all_warnings.append(f"Failed to normalize transaction {txn.id}")
 
         return PortfolioSummary(
-            total_value=total_value,
-            total_cost_basis=total_cost_basis,
-            total_unrealized_gain=total_unrealized_gain,
+            total_value=total_value_czk,
+            total_cost_basis=total_cost_basis_czk,
+            total_unrealized_gain=total_unrealized_gain_czk,
             total_unrealized_gain_percent=total_unrealized_gain_percent,
-            total_realized_gain=total_realized_gain,
-            cash_balance=cash_balance,
-            number_of_holdings=len(holdings)
+            total_realized_gain=total_realized_gain_czk,
+            cash_balance=cash_balance_czk,
+            number_of_holdings=len(holdings),
+            currency='CZK',
+            conversion_warnings=all_warnings if all_warnings else None
         )
 
     @staticmethod
@@ -215,6 +280,49 @@ class PortfolioService:
         allocations.sort(key=lambda x: x.value, reverse=True)
 
         return allocations
+
+    @staticmethod
+    def get_cash_balance_at_date(db: Session, target_date: date) -> float:
+        """
+        Calculate cash balance up to (and including) a specific date.
+        Used for validation of BUY/WITHDRAWAL transactions.
+
+        Args:
+            db: Database session
+            target_date: Calculate balance up to this date
+
+        Returns:
+            Cash balance in CZK at the specified date
+        """
+        cash_transactions = db.query(Transaction).filter(
+            Transaction.transaction_type.in_(['DEPOSIT', 'WITHDRAWAL', 'BUY', 'SELL', 'DIVIDEND', 'FEE', 'TAX']),
+            Transaction.transaction_date <= target_date
+        ).order_by(Transaction.transaction_date.asc(), Transaction.id.asc()).all()
+
+        cash_balance_czk = 0
+
+        for txn in cash_transactions:
+            try:
+                normalized = CurrencyNormalizer.normalize_transaction(txn, db)
+
+                if txn.transaction_type == 'DEPOSIT':
+                    cash_balance_czk += normalized['amount_czk']
+                elif txn.transaction_type == 'WITHDRAWAL':
+                    cash_balance_czk += normalized['amount_czk']  # Already negative
+                elif txn.transaction_type == 'BUY':
+                    cash_balance_czk -= normalized['amount_czk']
+                elif txn.transaction_type == 'SELL':
+                    cash_balance_czk += normalized['amount_czk']
+                elif txn.transaction_type == 'DIVIDEND':
+                    cash_balance_czk += normalized['amount_czk']
+                elif txn.transaction_type == 'FEE':
+                    cash_balance_czk += normalized['amount_czk']
+                elif txn.transaction_type == 'TAX':
+                    cash_balance_czk += normalized['amount_czk']
+            except Exception as e:
+                logger.warning(f"Failed to normalize transaction {txn.id} in cash calculation: {e}")
+
+        return cash_balance_czk
 
     @staticmethod
     def refresh_portfolio_prices(db: Session) -> Dict[str, float]:

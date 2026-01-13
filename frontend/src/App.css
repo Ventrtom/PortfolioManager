@@ -77,6 +77,69 @@
   color: #1f2937;
 }
 
+.dashboard-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.last-updated {
+  font-size: 0.875rem;
+  color: #666;
+}
+
+.last-updated .duration {
+  color: #999;
+  font-style: italic;
+}
+
+.refresh-button {
+  padding: 0.5rem 1rem;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.refresh-button:hover:not(:disabled) {
+  background-color: #0056b3;
+}
+
+.refresh-button:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Conversion Warning */
+.conversion-warning {
+  background-color: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 4px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.conversion-warning strong {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: #856404;
+}
+
+.conversion-warning ul {
+  margin: 0;
+  padding-left: 1.5rem;
+  color: #856404;
+}
+
+.conversion-warning li {
+  margin-bottom: 0.25rem;
+}
+
 .refresh-btn {
   background: #3b82f6;
   color: white;
@@ -701,6 +764,130 @@ tr:hover {
 
 .footer p {
   margin: 0;
+}
+
+/* ========================================
+   TRANSACTION LIST FILTER & SORT STYLES
+   ======================================== */
+
+/* Transaction List Filter Bar */
+.transactions-filter-bar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding: 15px;
+  background: #f9fafb;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.transactions-filter-bar select,
+.transactions-filter-bar input[type="text"],
+.transactions-filter-bar input[type="date"] {
+  padding: 8px 12px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.transactions-filter-bar .search-input {
+  flex: 1;
+  min-width: 150px;
+}
+
+.transactions-filter-bar .date-range {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.transactions-filter-bar .filter-label {
+  font-size: 13px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.transactions-filter-bar .results-count {
+  margin-left: auto;
+  font-size: 14px;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+/* Sortable Table Headers */
+.sortable-header {
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.2s;
+}
+
+.sortable-header:hover {
+  background-color: #e5e7eb;
+}
+
+.sortable-header.active {
+  font-weight: 700;
+  color: #3b82f6;
+}
+
+/* Date Range Validation */
+.date-range-warning {
+  background: #fef3c7;
+  border: 1px solid #fbbf24;
+  color: #92400e;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.date-range-warning::before {
+  content: '⚠';
+  font-size: 16px;
+}
+
+/* No Results State */
+.no-results-state {
+  text-align: center;
+  padding: 3rem;
+  color: #6b7280;
+}
+
+.no-results-state h3 {
+  font-size: 1.25rem;
+  margin-bottom: 0.5rem;
+  color: #374151;
+}
+
+.no-results-state p {
+  margin-bottom: 1rem;
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+  .transactions-filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .transactions-filter-bar .search-input {
+    width: 100%;
+  }
+
+  .transactions-filter-bar .date-range {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .transactions-filter-bar .results-count {
+    margin-left: 0;
+    text-align: center;
+  }
 }
 
 /* ========================================

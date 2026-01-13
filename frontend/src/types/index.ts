@@ -1,11 +1,20 @@
+// Currency types
+export type Currency = 'USD' | 'EUR' | 'CZK';
+
 // Transaction types
+export type TransactionType = 'BUY' | 'SELL' | 'DIVIDEND' | 'FEE' | 'TAX' | 'DEPOSIT' | 'WITHDRAWAL' | 'INTEREST' | 'SPLIT';
+
 export interface Transaction {
   id: number;
-  transaction_type: 'BUY' | 'SELL' | 'DIVIDEND' | 'FEE' | 'TAX';
+  transaction_type: TransactionType;
   ticker: string;
   quantity?: number | null;
   price?: number | null;
   total_amount: number;
+  transaction_currency: Currency;
+  amount_usd?: number | null;
+  amount_eur?: number | null;
+  amount_czk?: number | null;
   transaction_date: string;
   notes?: string | null;
   created_at: string;
@@ -18,6 +27,7 @@ export interface TransactionCreate {
   quantity?: number | null;
   price?: number | null;
   total_amount: number;
+  transaction_currency: Currency;
   transaction_date: string;
   notes?: string | null;
 }
@@ -28,6 +38,7 @@ export interface ParsedTransaction {
   quantity?: number | null;
   price?: number | null;
   total_amount: number;
+  transaction_currency?: Currency;
   transaction_date: string;
   raw_input: string;
 }
@@ -145,6 +156,27 @@ export interface KPIResponse {
   dividends: DividendSummary;
 }
 
+export interface SnapshotMetadata {
+  calculated_at: string;
+  calculation_duration_ms?: number;
+}
+
+export interface KPIResponseWithMetadata extends KPIResponse {
+  metadata: SnapshotMetadata;
+}
+
+export interface SnapshotHistoryItem {
+  id: number;
+  calculated_at: string;
+  total_value: number;
+  unrealized_gain: number;
+  unrealized_gain_percent: number;
+  daily_volatility?: number;
+  annualized_volatility?: number;
+  sharpe_ratio?: number;
+  dividend_yield: number;
+}
+
 // Stock types
 export interface Stock {
   ticker: string;
@@ -164,6 +196,11 @@ export interface Stock {
   holdings_value: number;
   cost_basis: number;
   unrealized_gain: number;
+  // Price fetch skip flags
+  skip_price_fetch: boolean;
+  skip_price_reason: string | null;
+  skip_price_since: string | null;
+  consecutive_failures: number;
 }
 
 export interface StockFilterCriteria {

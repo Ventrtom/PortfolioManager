@@ -9,6 +9,8 @@ import type {
   SectorAllocation,
   PerformanceDataPoint,
   KPIResponse,
+  KPIResponseWithMetadata,
+  SnapshotHistoryItem,
   Stock,
   StockFilterCriteria,
 } from '../types';
@@ -59,6 +61,17 @@ export const transactionAPI = {
     const response = await apiClient.get('/transactions/summary/stats');
     return response.data;
   },
+
+  refreshCurrencies: async (transactionIds?: number[]): Promise<{
+    updated: number;
+    failed: number;
+    errors: string[];
+  }> => {
+    const response = await apiClient.post('/transactions/refresh-currencies', {
+      transaction_ids: transactionIds || null,
+    });
+    return response.data;
+  },
 };
 
 // Portfolio API
@@ -98,8 +111,22 @@ export const analyticsAPI = {
     return response.data;
   },
 
-  getKPIs: async (): Promise<KPIResponse> => {
-    const response = await apiClient.get('/analytics/kpis');
+  getKPIs: async (currency: string = 'CZK'): Promise<KPIResponseWithMetadata> => {
+    const response = await apiClient.get('/analytics/kpis', {
+      params: { currency },
+    });
+    return response.data;
+  },
+
+  recalculateKPIs: async (): Promise<KPIResponseWithMetadata> => {
+    const response = await apiClient.post('/analytics/kpis/recalculate');
+    return response.data;
+  },
+
+  getKPIHistory: async (limit: number = 100): Promise<SnapshotHistoryItem[]> => {
+    const response = await apiClient.get('/analytics/kpis/history', {
+      params: { limit },
+    });
     return response.data;
   },
 };
@@ -141,6 +168,28 @@ export const stockAPI = {
 
   getIndustries: async (): Promise<string[]> => {
     const response = await apiClient.get('/stocks/filters/industries');
+    return response.data;
+  },
+
+  getFlagged: async (): Promise<Stock[]> => {
+    const response = await apiClient.get('/stocks/flagged');
+    return response.data;
+  },
+
+  updateSkipPriceFlag: async (
+    ticker: string,
+    skip: boolean,
+    reason?: string
+  ): Promise<{
+    message: string;
+    ticker: string;
+    skip_price_fetch: boolean;
+    skip_price_reason: string | null;
+    skip_price_since: string | null;
+  }> => {
+    const response = await apiClient.patch(`/stocks/${ticker}/skip-price`, null, {
+      params: { skip, reason },
+    });
     return response.data;
   },
 };

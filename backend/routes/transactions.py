@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from models.database import get_db
 from models.schemas import (
-    TransactionCreate, TransactionUpdate, TransactionResponse, ParsedTransaction
+    TransactionCreate, TransactionUpdate, TransactionResponse, ParsedTransaction,
+    CurrencyRefreshRequest, CurrencyRefreshResponse
 )
 from services.transaction_service import TransactionService
 from utils.parser import TransactionParser
@@ -17,27 +18,39 @@ def create_transaction(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
-    """Create a new transaction"""
+    """Create a new transaction with validation and enrichment"""
+    from services.validation_service import ValidationError
+
     try:
-        # Auto-create stock if doesn't exist
-        from services.stock_service import StockService
-        from services.enrichment_service import EnrichmentService
+        # Auto-create stock if doesn't exist (only for BUY/SELL with ticker)
+        if transaction.transaction_type.upper() in ['BUY', 'SELL'] and transaction.ticker:
+            from services.stock_service import StockService
+            from services.enrichment_service import EnrichmentService
 
-        ticker = transaction.ticker.upper()
+            ticker = transaction.ticker.upper()
+            stock = StockService.create_stock(ticker, db)
 
-        # Create stock if new
-        stock = StockService.create_stock(ticker, db)
+            # Trigger background enrichment if stock is new
+            if stock.enrichment_status == 'pending':
+                background_tasks.add_task(
+                    EnrichmentService.enrich_stock,
+                    ticker,
+                    db
+                )
 
-        # If stock is new (pending status), trigger enrichment
-        if stock.enrichment_status == 'pending':
-            background_tasks.add_task(
-                EnrichmentService.enrich_stock,
-                ticker,
-                db
-            )
-
-        # Create transaction
+        # Create transaction (includes validation)
         return TransactionService.create_transaction(db, transaction)
+
+    except ValidationError as e:
+        # Return structured validation error
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": e.message,
+                "field": e.field,
+                "code": e.code
+            }
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -134,3 +147,24 @@ def get_transaction_history(
     if not history:
         raise HTTPException(status_code=404, detail="No history found for this transaction")
     return history
+
+
+@router.post("/refresh-currencies", response_model=CurrencyRefreshResponse)
+def refresh_transaction_currencies(
+    request: CurrencyRefreshRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Recalculate currency amounts for transactions
+    Admin/developer endpoint for batch updates
+    If transaction_ids is provided, only those transactions are updated
+    If transaction_ids is None, ALL transactions are updated
+    """
+    try:
+        result = TransactionService.refresh_currency_amounts(
+            db,
+            transaction_ids=request.transaction_ids
+        )
+        return CurrencyRefreshResponse(**result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

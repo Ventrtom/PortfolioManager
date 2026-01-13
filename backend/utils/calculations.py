@@ -1,6 +1,88 @@
 import numpy as np
-from typing import List, Dict
+from typing import List, Dict, Optional
 from datetime import date
+from collections import defaultdict
+
+
+class DataFrequencyDetector:
+    """Detect time series data frequency for correct annualization"""
+
+    @staticmethod
+    def detect_frequency(dates: List[date]) -> Dict:
+        """
+        Detect data frequency from date series.
+
+        Args:
+            dates: List of dates in the time series
+
+        Returns:
+            {
+                'frequency': 'daily' | 'weekly' | 'monthly' | 'unknown',
+                'periods_per_year': int,
+                'avg_gap_days': float,
+                'sample_size': int,
+                'confidence': 'high' | 'medium' | 'low'
+            }
+        """
+        if len(dates) < 2:
+            return {
+                'frequency': 'unknown',
+                'periods_per_year': 252,  # Default to daily
+                'avg_gap_days': 1,
+                'sample_size': len(dates),
+                'confidence': 'low'
+            }
+
+        # Calculate gaps between consecutive dates
+        sorted_dates = sorted(dates)
+        gaps = [(sorted_dates[i+1] - sorted_dates[i]).days for i in range(len(sorted_dates) - 1)]
+
+        # Remove zeros (duplicate dates)
+        gaps = [g for g in gaps if g > 0]
+
+        if not gaps:
+            return {
+                'frequency': 'unknown',
+                'periods_per_year': 252,
+                'avg_gap_days': 0,
+                'sample_size': 0,
+                'confidence': 'low'
+            }
+
+        avg_gap = np.mean(gaps)
+        std_gap = np.std(gaps)
+
+        # Determine frequency based on average gap
+        if avg_gap <= 1.5:
+            frequency = 'daily'
+            periods_per_year = 252  # Trading days
+        elif 5 <= avg_gap <= 9:
+            frequency = 'weekly'
+            periods_per_year = 52
+        elif 28 <= avg_gap <= 33:
+            frequency = 'monthly'
+            periods_per_year = 12
+        else:
+            frequency = 'unknown'
+            # Estimate periods per year
+            periods_per_year = max(1, int(365 / avg_gap))
+
+        # Confidence based on consistency (low std = high confidence)
+        # Made more lenient - weekly data with weekend gaps is normal
+        if std_gap < avg_gap * 0.5:
+            confidence = 'high'
+        elif std_gap < avg_gap * 0.8:
+            confidence = 'medium'
+        else:
+            confidence = 'low'
+
+        return {
+            'frequency': frequency,
+            'periods_per_year': periods_per_year,
+            'avg_gap_days': float(avg_gap),
+            'sample_size': len(gaps),
+            'confidence': confidence
+        }
 
 
 class FinancialCalculations:
@@ -31,12 +113,16 @@ class FinancialCalculations:
             else:
                 # Use partial purchase
                 total_cost += remaining_quantity * purchase['price']
-                # Keep the unused portion
-                remaining_purchases.append({
+                # Keep the unused portion - preserve all fields including transaction_id
+                partial_purchase = {
                     'quantity': purchase['quantity'] - remaining_quantity,
                     'price': purchase['price'],
                     'date': purchase['date']
-                })
+                }
+                # Preserve transaction_id if it exists (for FIFO lot tracking)
+                if 'transaction_id' in purchase:
+                    partial_purchase['transaction_id'] = purchase['transaction_id']
+                remaining_purchases.append(partial_purchase)
                 remaining_quantity = 0
 
         cost_basis = total_cost
@@ -60,22 +146,54 @@ class FinancialCalculations:
         }
 
     @staticmethod
-    def calculate_volatility(prices: List[float]) -> Dict:
+    def calculate_volatility(prices: List[float], dates: Optional[List[date]] = None) -> Dict:
         """
-        Calculate volatility metrics from price series
-        Returns dict with daily and annualized volatility
+        Calculate volatility metrics from price series with automatic frequency detection.
+
+        Args:
+            prices: List of portfolio values or prices
+            dates: Optional list of dates (for frequency detection)
+
+        Returns:
+            {
+                'daily_volatility': float,
+                'annualized_volatility': float,
+                'frequency': str,
+                'periods_per_year': int,
+                'data_quality': str
+            }
         """
         if len(prices) < 2:
-            return {'daily_volatility': 0, 'annualized_volatility': 0}
+            return {
+                'daily_volatility': 0,
+                'annualized_volatility': 0,
+                'frequency': 'unknown',
+                'periods_per_year': 0,
+                'data_quality': 'insufficient'
+            }
 
-        # Calculate daily returns
+        # Detect frequency if dates provided
+        freq_info = None
+        if dates and len(dates) == len(prices):
+            freq_info = DataFrequencyDetector.detect_frequency(dates)
+
+        # Default to daily if no dates provided
+        periods_per_year = freq_info['periods_per_year'] if freq_info else 252
+
+        # Calculate returns
         prices_array = np.array(prices)
 
         # Filter out zero and NaN values
         valid_prices = prices_array[~np.isnan(prices_array) & (prices_array > 0)]
 
         if len(valid_prices) < 2:
-            return {'daily_volatility': 0, 'annualized_volatility': 0}
+            return {
+                'daily_volatility': 0,
+                'annualized_volatility': 0,
+                'frequency': freq_info['frequency'] if freq_info else 'unknown',
+                'periods_per_year': periods_per_year,
+                'data_quality': 'insufficient'
+            }
 
         # Calculate returns, filtering out invalid divisions
         returns = np.diff(valid_prices) / valid_prices[:-1]
@@ -84,32 +202,67 @@ class FinancialCalculations:
         returns = returns[np.isfinite(returns)]
 
         if len(returns) < 2:
-            return {'daily_volatility': 0, 'annualized_volatility': 0}
+            return {
+                'daily_volatility': 0,
+                'annualized_volatility': 0,
+                'frequency': freq_info['frequency'] if freq_info else 'unknown',
+                'periods_per_year': periods_per_year,
+                'data_quality': 'insufficient'
+            }
 
-        # Calculate standard deviation (volatility)
-        daily_volatility = np.std(returns, ddof=1)
+        # Calculate period volatility (standard deviation)
+        period_volatility = np.std(returns, ddof=1)
 
-        # Annualize (assuming 252 trading days)
-        annualized_volatility = daily_volatility * np.sqrt(252)
+        # CRITICAL FIX: Annualize using detected frequency
+        annualized_volatility = period_volatility * np.sqrt(periods_per_year)
 
         # Ensure values are finite
-        daily_vol = float(daily_volatility) if np.isfinite(daily_volatility) else 0.0
+        period_vol = float(period_volatility) if np.isfinite(period_volatility) else 0.0
         annual_vol = float(annualized_volatility) if np.isfinite(annualized_volatility) else 0.0
 
         return {
-            'daily_volatility': daily_vol,
-            'annualized_volatility': annual_vol
+            'daily_volatility': period_vol,  # Actually "period" volatility
+            'annualized_volatility': annual_vol,
+            'frequency': freq_info['frequency'] if freq_info else 'assumed_daily',
+            'periods_per_year': periods_per_year,
+            'data_quality': freq_info['confidence'] if freq_info else 'assumed'
         }
 
     @staticmethod
-    def calculate_sharpe_ratio(returns: List[float], risk_free_rate: float = 0.03) -> float:
+    def calculate_sharpe_ratio(returns: List[float], risk_free_rate: float = 0.03,
+                               dates: Optional[List[date]] = None) -> Dict:
         """
-        Calculate Sharpe ratio
-        returns: List of period returns
-        risk_free_rate: Annual risk-free rate (default 3%)
+        Calculate Sharpe ratio with frequency detection.
+
+        Args:
+            returns: List of period returns
+            risk_free_rate: Annual risk-free rate (default 3%)
+            dates: Optional list of dates (for frequency detection, needs n+1 dates for n returns)
+
+        Returns:
+            {
+                'sharpe_ratio': float,
+                'annualized_return': float,
+                'annualized_volatility': float,
+                'frequency': str,
+                'data_quality': str
+            }
         """
         if len(returns) < 2:
-            return 0
+            return {
+                'sharpe_ratio': 0,
+                'annualized_return': 0,
+                'annualized_volatility': 0,
+                'frequency': 'unknown',
+                'data_quality': 'insufficient'
+            }
+
+        # Detect frequency
+        freq_info = None
+        if dates and len(dates) >= len(returns) + 1:  # Need n+1 dates for n returns
+            freq_info = DataFrequencyDetector.detect_frequency(dates)
+
+        periods_per_year = freq_info['periods_per_year'] if freq_info else 252
 
         returns_array = np.array(returns)
 
@@ -117,22 +270,40 @@ class FinancialCalculations:
         valid_returns = returns_array[np.isfinite(returns_array)]
 
         if len(valid_returns) < 2:
-            return 0
+            return {
+                'sharpe_ratio': 0,
+                'annualized_return': 0,
+                'annualized_volatility': 0,
+                'frequency': freq_info['frequency'] if freq_info else 'unknown',
+                'data_quality': 'insufficient'
+            }
 
         avg_return = np.mean(valid_returns)
         std_return = np.std(valid_returns, ddof=1)
 
         if std_return == 0 or not np.isfinite(std_return):
-            return 0
+            annualized_return = avg_return * periods_per_year if np.isfinite(avg_return) else 0
+            return {
+                'sharpe_ratio': 0,
+                'annualized_return': float(annualized_return),
+                'annualized_volatility': 0,
+                'frequency': freq_info['frequency'] if freq_info else 'assumed_daily',
+                'data_quality': 'zero_volatility'
+            }
 
-        # Annualize assuming daily returns
-        annualized_return = avg_return * 252
-        annualized_std = std_return * np.sqrt(252)
+        # CRITICAL FIX: Use detected frequency for annualization
+        annualized_return = avg_return * periods_per_year
+        annualized_std = std_return * np.sqrt(periods_per_year)
 
         sharpe_ratio = (annualized_return - risk_free_rate) / annualized_std
 
-        # Ensure result is finite
-        return float(sharpe_ratio) if np.isfinite(sharpe_ratio) else 0.0
+        return {
+            'sharpe_ratio': float(sharpe_ratio) if np.isfinite(sharpe_ratio) else 0.0,
+            'annualized_return': float(annualized_return) if np.isfinite(annualized_return) else 0.0,
+            'annualized_volatility': float(annualized_std) if np.isfinite(annualized_std) else 0.0,
+            'frequency': freq_info['frequency'] if freq_info else 'assumed_daily',
+            'data_quality': freq_info['confidence'] if freq_info else 'assumed'
+        }
 
     @staticmethod
     def calculate_herfindahl_index(weights: List[float]) -> float:
@@ -226,3 +397,229 @@ class FinancialCalculations:
             'top_5_concentration': top_5_concentration,
             'herfindahl_index': hhi
         }
+
+
+class RealizedGainsCalculator:
+    """Calculate realized gains from SELL transactions using FIFO"""
+
+    @staticmethod
+    def calculate_realized_gain_for_sell(ticker: str, sell_transaction, db) -> Dict:
+        """
+        Calculate realized gain for a specific SELL transaction.
+
+        Args:
+            ticker: Stock ticker
+            sell_transaction: Transaction object for the SELL
+            db: Database session
+
+        Returns:
+            {
+                'realized_gain_czk': float,
+                'cost_basis_czk': float,
+                'proceeds_czk': float,
+                'quantity_sold': float,
+                'matched_lots': List[Dict],
+                'warnings': List[str]
+            }
+        """
+        from sqlalchemy.orm import Session
+        from models.database import Transaction
+        from services.exchange_rate_service import CurrencyNormalizer
+
+        warnings = []
+
+        # Get all BUY transactions for this ticker before the sell
+        buy_txns = db.query(Transaction).filter(
+            Transaction.ticker == ticker,
+            Transaction.transaction_type == 'BUY',
+            Transaction.transaction_date <= sell_transaction.transaction_date
+        ).order_by(Transaction.transaction_date.asc(), Transaction.id.asc()).all()
+
+        if not buy_txns:
+            warnings.append(f"SELL without matching BUY for {ticker} on {sell_transaction.transaction_date}")
+            return {
+                'realized_gain_czk': 0,
+                'cost_basis_czk': 0,
+                'proceeds_czk': 0,
+                'quantity_sold': sell_transaction.quantity,
+                'matched_lots': [],
+                'warnings': warnings
+            }
+
+        # Get all SELL transactions before this one (to track what's been used)
+        prior_sells = db.query(Transaction).filter(
+            Transaction.ticker == ticker,
+            Transaction.transaction_type == 'SELL',
+            Transaction.transaction_date < sell_transaction.transaction_date
+        ).order_by(Transaction.transaction_date.asc(), Transaction.id.asc()).all()
+
+        # Include same-day sells with lower ID (for same-day sells)
+        same_date_sells = db.query(Transaction).filter(
+            Transaction.ticker == ticker,
+            Transaction.transaction_type == 'SELL',
+            Transaction.transaction_date == sell_transaction.transaction_date,
+            Transaction.id < sell_transaction.id
+        ).all()
+
+        prior_sells.extend(same_date_sells)
+
+        # Build purchase list for FIFO (normalize to CZK)
+        purchases = []
+        for buy in buy_txns:
+            # Normalize buy amount to CZK
+            buy_normalized = CurrencyNormalizer.normalize_transaction(buy, db)
+            if buy_normalized['conversion_warning']:
+                warnings.append(buy_normalized['conversion_warning'])
+
+            # Use absolute value to handle negative BUY amounts (semantic sign convention)
+            # BUY amounts are stored as negative (money out), but we need positive price per share
+            price_per_share_czk = abs(buy_normalized['amount_czk']) / buy.quantity if buy.quantity > 0 else 0
+
+            purchases.append({
+                'quantity': buy.quantity,
+                'price': price_per_share_czk,  # CZK price per share (always positive)
+                'date': buy.transaction_date,
+                'transaction_id': buy.id
+            })
+
+        # Reduce purchases by prior sells (FIFO)
+        for prior_sell in prior_sells:
+            _, purchases = FinancialCalculations.calculate_fifo_cost_basis(
+                purchases,
+                prior_sell.quantity
+            )
+
+        # Now calculate cost basis for THIS sell
+        quantity_to_sell = sell_transaction.quantity
+        cost_basis_czk, remaining_purchases = FinancialCalculations.calculate_fifo_cost_basis(
+            purchases,
+            quantity_to_sell
+        )
+
+        # Track matched lots
+        matched_lots = []
+        remaining_qty = quantity_to_sell
+
+        for purchase in purchases:
+            if remaining_qty <= 0:
+                break
+
+            qty_from_lot = min(purchase['quantity'], remaining_qty)
+            holding_period = (sell_transaction.transaction_date - purchase['date']).days
+
+            matched_lots.append({
+                'buy_transaction_id': purchase['transaction_id'],
+                'quantity': qty_from_lot,
+                'purchase_price_czk': purchase['price'],
+                'purchase_date': purchase['date'],
+                'holding_period_days': holding_period
+            })
+
+            remaining_qty -= qty_from_lot
+
+        # Calculate proceeds (normalize sell to CZK)
+        sell_normalized = CurrencyNormalizer.normalize_transaction(sell_transaction, db)
+        if sell_normalized['conversion_warning']:
+            warnings.append(sell_normalized['conversion_warning'])
+
+        proceeds_czk = sell_normalized['amount_czk']
+
+        # Realized gain
+        realized_gain_czk = proceeds_czk - cost_basis_czk
+
+        return {
+            'realized_gain_czk': realized_gain_czk,
+            'cost_basis_czk': cost_basis_czk,
+            'proceeds_czk': proceeds_czk,
+            'quantity_sold': quantity_to_sell,
+            'matched_lots': matched_lots,
+            'warnings': warnings
+        }
+
+    @staticmethod
+    def calculate_total_realized_gains(db) -> float:
+        """
+        Calculate total realized gains across all SELL transactions.
+
+        Args:
+            db: Database session
+
+        Returns:
+            Total realized gains in CZK
+        """
+        from models.database import Transaction
+
+        sell_transactions = db.query(Transaction).filter(
+            Transaction.transaction_type == 'SELL'
+        ).order_by(Transaction.transaction_date.asc(), Transaction.id.asc()).all()
+
+        total_realized_gain_czk = 0
+
+        for sell in sell_transactions:
+            result = RealizedGainsCalculator.calculate_realized_gain_for_sell(
+                sell.ticker,
+                sell,
+                db
+            )
+            total_realized_gain_czk += result['realized_gain_czk']
+
+        return total_realized_gain_czk
+
+    @staticmethod
+    def get_realized_gains_by_ticker(db) -> Dict[str, float]:
+        """
+        Get realized gains broken down by ticker.
+
+        Args:
+            db: Database session
+
+        Returns:
+            {ticker: realized_gain_czk}
+        """
+        from models.database import Transaction
+
+        sell_transactions = db.query(Transaction).filter(
+            Transaction.transaction_type == 'SELL'
+        ).order_by(Transaction.transaction_date.asc()).all()
+
+        gains_by_ticker = defaultdict(float)
+
+        for sell in sell_transactions:
+            result = RealizedGainsCalculator.calculate_realized_gain_for_sell(
+                sell.ticker,
+                sell,
+                db
+            )
+            gains_by_ticker[sell.ticker] += result['realized_gain_czk']
+
+        return dict(gains_by_ticker)
+
+    @staticmethod
+    def get_realized_gains_by_year(db) -> Dict[int, float]:
+        """
+        Get realized gains broken down by tax year.
+
+        Args:
+            db: Database session
+
+        Returns:
+            {year: realized_gain_czk}
+        """
+        from models.database import Transaction
+
+        sell_transactions = db.query(Transaction).filter(
+            Transaction.transaction_type == 'SELL'
+        ).order_by(Transaction.transaction_date.asc()).all()
+
+        gains_by_year = defaultdict(float)
+
+        for sell in sell_transactions:
+            result = RealizedGainsCalculator.calculate_realized_gain_for_sell(
+                sell.ticker,
+                sell,
+                db
+            )
+            year = sell.transaction_date.year
+            gains_by_year[year] += result['realized_gain_czk']
+
+        return dict(gains_by_year)
