@@ -137,9 +137,10 @@ class RobustMarketDataService:
                     logger.debug(f"{provider_name} returned no price for {ticker}")
 
             except json.JSONDecodeError as e:
-                # Empty response from this provider - try next provider before marking as delisted
-                logger.warning(f"{provider_name} empty response for {ticker}, trying next provider...")
-                continue
+                # Empty response - likely delisted
+                logger.warning(f"{provider_name} empty response for {ticker} (likely delisted)")
+                self._mark_as_delisted(ticker, db, f"Empty response from {provider_name}")
+                return None
 
             except requests.exceptions.RequestException as e:
                 # Network/API error - try next provider
@@ -151,9 +152,8 @@ class RobustMarketDataService:
                 logger.error(f"{provider_name} error for {ticker}: {str(e)[:100]}")
                 continue
 
-        # All providers failed - mark as delisted/unavailable
-        logger.warning(f"All providers failed for {ticker} - marking as unavailable")
-        self._mark_as_delisted(ticker, db, f"All providers failed")
+        # All providers failed - determine why
+        logger.warning(f"All providers failed for {ticker}")
         return None
 
     def _fetch_price_yfinance(self, ticker: str) -> Optional[float]:
@@ -384,24 +384,3 @@ class RobustMarketDataService:
             }
 
         return None
-
-
-# Create singleton instance for backward compatibility
-_service_instance = RobustMarketDataService()
-
-
-class MarketDataService:
-    """
-    Static wrapper for backward compatibility
-    Delegates to RobustMarketDataService instance
-    """
-
-    @staticmethod
-    def get_current_price(ticker: str, db: Session) -> Optional[float]:
-        """Get current price with multi-provider fallback"""
-        return _service_instance.get_current_price(ticker, db)
-
-    @staticmethod
-    def get_stock_info(ticker: str, db: Session) -> Optional[Dict]:
-        """Get stock info with multi-provider fallback"""
-        return _service_instance.get_stock_info(ticker, db)
