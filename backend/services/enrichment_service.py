@@ -47,17 +47,34 @@ class EnrichmentService:
             resolution = TickerResolutionService.resolve_ticker(ticker)
 
             if not resolution['success']:
-                # All methods failed
-                stock.enrichment_status = 'failed'
-                stock.enrichment_error = f"Could not resolve ticker via any method"
-                db.commit()
+                # Check if manual review is needed
+                if resolution.get('needs_manual_review'):
+                    stock.enrichment_status = 'manual'
+                    stock.enrichment_error = f"Requires manual review: {resolution.get('manual_review_reason', 'Unknown reason')}"
+                    db.commit()
 
-                return {
-                    'success': False,
-                    'status': 'failed',
-                    'data': None,
-                    'error': stock.enrichment_error
-                }
+                    logger.warning(f"Ticker {ticker} marked for manual review: {stock.enrichment_error}")
+
+                    return {
+                        'success': False,
+                        'status': 'manual',
+                        'data': None,
+                        'error': stock.enrichment_error,
+                        'needs_manual_review': True,
+                        'ai_analysis': resolution.get('ai_data')
+                    }
+                else:
+                    # All methods failed without specific manual review flag
+                    stock.enrichment_status = 'failed'
+                    stock.enrichment_error = f"Could not resolve ticker via any method"
+                    db.commit()
+
+                    return {
+                        'success': False,
+                        'status': 'failed',
+                        'data': None,
+                        'error': stock.enrichment_error
+                    }
 
             # Step 2: Fetch data with resolved symbol using multi-provider service
             working_symbol = resolution['resolved_symbol']

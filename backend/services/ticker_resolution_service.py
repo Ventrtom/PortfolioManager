@@ -221,7 +221,7 @@ If you cannot determine the ticker with reasonable confidence, respond with:
                         'ai_data': None
                     }
 
-            # Tier 3: Use AI only if API key is available
+            # Tier 3: Use AI Ticker Analyzer Agent
             api_key = os.environ.get('ANTHROPIC_API_KEY')
             if not api_key:
                 logger.warning(f"[Tier 3] Skipping AI resolution - ANTHROPIC_API_KEY not set")
@@ -230,34 +230,72 @@ If you cannot determine the ticker with reasonable confidence, respond with:
                     'resolved_symbol': None,
                     'alternative_symbols': [],
                     'method': 'failed',
-                    'ai_data': None
+                    'ai_data': None,
+                    'needs_manual_review': True,
+                    'manual_review_reason': 'All providers failed and AI is not configured'
                 }
 
-            logger.info(f"[Tier 3] Using AI to resolve ticker: {ticker}")
-            ai_result = cls.resolve_with_ai(ticker)
+            logger.info(f"[Tier 3] Using AI Ticker Analyzer Agent: {ticker}")
+            from services.agents.ticker_analyzer_agent import TickerAnalyzerAgent
 
-            if ai_result and ai_result['alternative_symbols']:
-                # Try each AI-suggested symbol with all providers
-                for symbol in ai_result['alternative_symbols']:
-                    logger.info(f"  Trying AI suggestion: {symbol}")
+            analyzer = TickerAnalyzerAgent()
+            analysis = analyzer.analyze_ticker(ticker)
+
+            # Check if AI recommends using a successor ticker
+            if analysis.recommended_action == "use_successor" and analysis.successor_ticker:
+                successor = analysis.successor_ticker
+                logger.info(f"  AI identified successor ticker: {successor} ({analysis.successor_company})")
+
+                # Try successor ticker
+                stock_info = multi_provider.get_stock_info(successor, db)
+
+                if stock_info and stock_info.get('company_name'):
+                    return {
+                        'success': True,
+                        'resolved_symbol': successor,
+                        'alternative_symbols': analysis.alternative_symbols,
+                        'method': 'ai_successor',
+                        'ai_data': analysis.to_dict(),
+                        'note': f"Original ticker {ticker} resolved to successor {successor}"
+                    }
+
+            # Try all alternative symbols suggested by AI
+            if analysis.alternative_symbols:
+                for symbol in analysis.alternative_symbols:
+                    logger.info(f"  Trying AI suggested symbol: {symbol}")
                     stock_info = multi_provider.get_stock_info(symbol, db)
 
                     if stock_info and stock_info.get('company_name'):
                         return {
                             'success': True,
                             'resolved_symbol': symbol,
-                            'alternative_symbols': ai_result['alternative_symbols'],
+                            'alternative_symbols': analysis.alternative_symbols,
                             'method': 'ai',
-                            'ai_data': ai_result
+                            'ai_data': analysis.to_dict()
                         }
+
+            # Check if manual review is required
+            if analysis.recommended_action == 'manual_review_required':
+                logger.warning(f"[Tier 3] Ticker {ticker} marked for manual review by AI")
+                return {
+                    'success': False,
+                    'resolved_symbol': None,
+                    'alternative_symbols': analysis.alternative_symbols,
+                    'method': 'failed',
+                    'ai_data': analysis.to_dict(),
+                    'needs_manual_review': True,
+                    'manual_review_reason': analysis.missing_information or 'AI could not resolve with confidence'
+                }
 
             # All methods failed
             return {
                 'success': False,
                 'resolved_symbol': None,
-                'alternative_symbols': [],
+                'alternative_symbols': analysis.alternative_symbols,
                 'method': 'failed',
-                'ai_data': ai_result
+                'ai_data': analysis.to_dict(),
+                'needs_manual_review': analysis.confidence not in ['high', 'medium'],
+                'manual_review_reason': 'No working symbols found'
             }
 
         finally:
