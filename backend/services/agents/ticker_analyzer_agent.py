@@ -245,6 +245,118 @@ Look for press releases from the company about ticker changes or mergers."""
                 web_search_used=use_web_search
             )
 
+    def _verify_successor_suggestion(self, original_ticker: str, suggested_successor: str, original_company: str, successor_company: str) -> bool:
+        """
+        Verify that the AI's successor suggestion is plausible by:
+        1. Checking if suggested successor ticker actually exists in data providers
+        2. Validating company name similarity (for mergers/acquisitions)
+
+        Returns True if verification passes, False if suggestion seems incorrect
+        """
+        if not suggested_successor:
+            return True  # No successor to verify
+
+        actual_successor_name = None
+
+        # Try yfinance first
+        try:
+            import yfinance as yf
+            import time
+
+            time.sleep(0.5)  # Small delay to avoid rate limits
+            ticker_obj = yf.Ticker(suggested_successor)
+            info = ticker_obj.info
+            actual_successor_name = info.get('longName') or info.get('shortName', '')
+
+            if actual_successor_name:
+                logger.info(f"yfinance found {suggested_successor}: {actual_successor_name}")
+        except Exception as e:
+            logger.warning(f"yfinance verification failed for {suggested_successor}: {e}")
+
+        # If yfinance failed, try AlphaVantage as backup
+        if not actual_successor_name:
+            try:
+                import requests
+                api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
+                if api_key:
+                    url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={suggested_successor}&apikey={api_key}"
+                    response = requests.get(url, timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+                        actual_successor_name = data.get('Name', '')
+                        if actual_successor_name:
+                            logger.info(f"AlphaVantage found {suggested_successor}: {actual_successor_name}")
+            except Exception as e:
+                logger.warning(f"AlphaVantage verification failed for {suggested_successor}: {e}")
+
+        # If both providers failed to find the ticker
+        if not actual_successor_name:
+            logger.warning(
+                f"Successor verification FAILED: {suggested_successor} not found in any provider. "
+                f"AI suggested {original_ticker} → {suggested_successor}, but {suggested_successor} doesn't exist."
+            )
+            return False
+
+        # Check if company names are related
+        # For mergers/acquisitions, there are two name matches to verify:
+        # 1. Does the actual successor company name match what the AI claimed?
+        # 2. Is there ANY relationship between original company and successor company names?
+
+        actual_successor_name_lower = actual_successor_name.lower()
+        expected_successor_name = (successor_company or '').lower()
+        original_company_lower = (original_company or '').lower()
+
+        # Common words to ignore
+        ignore_words = {'inc', 'corp', 'corporation', 'company', 'ltd', 'limited', 'the', 'co', 'and', '&', 'plc', 'llc', 'lp', 'group'}
+
+        # Check 1: Verify AI's claimed successor name matches actual
+        if expected_successor_name:
+            expected_words = set(expected_successor_name.replace(',', '').replace('.', '').split())
+            actual_words = set(actual_successor_name_lower.replace(',', '').replace('.', '').split())
+            expected_words -= ignore_words
+            actual_words -= ignore_words
+
+            overlap = expected_words & actual_words
+
+            if not overlap:
+                logger.warning(
+                    f"Successor verification FAILED: AI's claimed successor name doesn't match actual. "
+                    f"AI said '{successor_company}' but ticker {suggested_successor} is '{actual_successor_name}'. "
+                    f"No meaningful word overlap."
+                )
+                return False
+
+        # Check 2: CRITICAL - Verify original company relates to successor
+        # For true mergers/ticker changes, there should be SOME name similarity
+        # OR the successor should contain part of the original name
+        # This catches hallucinations where AI suggests an unrelated company
+        if original_company_lower and actual_successor_name_lower:
+            original_words = set(original_company_lower.replace(',', '').replace('.', '').split())
+            actual_words = set(actual_successor_name_lower.replace(',', '').replace('.', '').split())
+            original_words -= ignore_words
+            actual_words -= ignore_words
+
+            # Check for ANY overlap between original and successor
+            overlap = original_words & actual_words
+
+            # Also check if original company name contains successor's key word or vice versa
+            # For example, "Exantas Capital" → "ACRES Commercial Realty" might share "Capital" → "Commercial"
+            # But "Exantas" and "Blackstone" share nothing
+
+            if not overlap:
+                logger.warning(
+                    f"Successor verification FAILED: Original company '{original_company}' and "
+                    f"successor '{actual_successor_name}' have NO name overlap. "
+                    f"This suggests AI hallucination - companies are unrelated."
+                )
+                return False
+
+        logger.info(
+            f"Successor verification PASSED: {suggested_successor} is '{actual_successor_name}' "
+            f"and relates to original company '{original_company}'"
+        )
+        return True
+
     def analyze_ticker(self, ticker: str) -> TickerAnalysisResult:
         """
         Analyze ticker with two-stage approach:
@@ -264,7 +376,32 @@ Look for press releases from the company about ticker changes or mergers."""
         logger.info(f"[Ticker Analyzer] Stage 1: Analyzing {ticker} with AI knowledge")
         result = self._call_claude(ticker, use_web_search=False)
 
-        # If we got high or medium confidence, return immediately
+        # CRITICAL: Verify successor suggestion before accepting
+        if result.successor_ticker and result.recommended_action == 'use_successor':
+            logger.info(f"[Ticker Analyzer] Verifying AI suggestion: {ticker} → {result.successor_ticker}")
+            verification_passed = self._verify_successor_suggestion(
+                original_ticker=ticker,
+                suggested_successor=result.successor_ticker,
+                original_company=result.company_name,
+                successor_company=result.successor_company
+            )
+
+            if not verification_passed:
+                logger.error(
+                    f"[Ticker Analyzer] VERIFICATION FAILED for {ticker} → {result.successor_ticker}. "
+                    f"AI suggestion appears to be incorrect. Marking for manual review."
+                )
+                # Override AI's confidence - this is a hallucination
+                result.confidence = 'needs_manual_review'
+                result.recommended_action = 'manual_review_required'
+                result.missing_information = (
+                    f"AI suggested successor {result.successor_ticker} failed verification. "
+                    f"The suggested ticker either doesn't exist or company name doesn't match. "
+                    f"Manual review required to find correct successor."
+                )
+                # Don't return yet - continue to web search if enabled
+
+        # If we got high or medium confidence AND verification passed, return immediately
         if result.confidence in ['high', 'medium']:
             return result
 
@@ -275,6 +412,28 @@ Look for press releases from the company about ticker changes or mergers."""
                 f"retrying with web search enabled"
             )
             result = self._call_claude(ticker, use_web_search=True)
+
+            # CRITICAL: Verify successor suggestion from web search too
+            if result.successor_ticker and result.recommended_action == 'use_successor':
+                logger.info(f"[Ticker Analyzer] Verifying web search suggestion: {ticker} → {result.successor_ticker}")
+                verification_passed = self._verify_successor_suggestion(
+                    original_ticker=ticker,
+                    suggested_successor=result.successor_ticker,
+                    original_company=result.company_name,
+                    successor_company=result.successor_company
+                )
+
+                if not verification_passed:
+                    logger.error(
+                        f"[Ticker Analyzer] WEB SEARCH VERIFICATION FAILED for {ticker} → {result.successor_ticker}. "
+                        f"Marking for manual review."
+                    )
+                    result.confidence = 'needs_manual_review'
+                    result.recommended_action = 'manual_review_required'
+                    result.missing_information = (
+                        f"Web search suggested successor {result.successor_ticker} failed verification. "
+                        f"Manual review required."
+                    )
 
             # If still uncertain after web search, mark for manual review
             if result.confidence not in ['high', 'medium']:

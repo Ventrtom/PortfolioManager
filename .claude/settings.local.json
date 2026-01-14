@@ -43,7 +43,16 @@
       "Bash(Select-Object State, OwningProcess, LocalAddress, LocalPort)",
       "Bash(Format-Table -AutoSize)",
       "Bash(powershell -Command:*)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Bash(if [ ! -d \"tests\" ])",
+      "Bash(then mkdir tests)",
+      "Bash(if [ ! -d \"scripts\" ])",
+      "Bash(then mkdir scripts)",
+      "Bash(git mv:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(taskkill:*)",
+      "Bash(git reset:*)",
+      "Bash(export:*)"
     ]
   }
 }
