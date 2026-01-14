@@ -12,8 +12,7 @@ from datetime import date, datetime
 from pydantic import BaseModel
 import json
 
-from models.database import ExchangeRate
-from database import get_db
+from models.database import ExchangeRate, get_db
 
 router = APIRouter()
 

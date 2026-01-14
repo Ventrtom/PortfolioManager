@@ -1,8 +1,24 @@
 # Portfolio Manager - Startup Script
 # Handles both first-time setup and subsequent launches
+#
+# Features:
+# - Automatic dependency installation (first-time setup)
+# - Version checking for Python (3.8+) and Node.js (16+)
+# - Port conflict detection and cleanup
+# - Process monitoring during startup
+# - Visible consoles by default (both backend and frontend)
+# - Simultaneous logging to startup.log files
+# - Graceful shutdown on Ctrl+C
+# - Health check verification before reporting success
+#
+# Usage:
+#   .\start.ps1                  # Start with browser and visible consoles
+#   .\start.ps1 -SkipBrowser     # Start without opening browser
+#   .\start.ps1 -Quiet           # Hide backend/frontend consoles (log to files only)
 
 param(
-    [switch]$SkipBrowser
+    [switch]$SkipBrowser,
+    [switch]$Quiet
 )
 
 $ErrorActionPreference = "Stop"
@@ -67,9 +83,17 @@ Write-Info "Checking prerequisites..."
 # Check Python
 try {
     $pythonVersion = (python --version 2>&1) -replace "Python ", ""
+    $pythonMajor = [int]($pythonVersion.Split('.')[0])
+    $pythonMinor = [int]($pythonVersion.Split('.')[1])
+
+    if ($pythonMajor -lt 3 -or ($pythonMajor -eq 3 -and $pythonMinor -lt 8)) {
+        Write-ErrorMsg "Python $pythonVersion is too old! Minimum required: Python 3.8"
+        Write-Host "Please upgrade Python from https://www.python.org/downloads/" -ForegroundColor Yellow
+        exit 1
+    }
     Write-Success "Python $pythonVersion found"
 } catch {
-    Write-ErrorMsg "Python not found!"
+    Write-ErrorMsg "Python not found or invalid!"
     Write-Host "Please install Python 3.8+ from https://www.python.org/downloads/" -ForegroundColor Yellow
     exit 1
 }
@@ -77,10 +101,17 @@ try {
 # Check Node.js
 try {
     $nodeVersion = (node --version) -replace "v", ""
+    $nodeMajor = [int]($nodeVersion.Split('.')[0])
+
+    if ($nodeMajor -lt 16) {
+        Write-ErrorMsg "Node.js $nodeVersion is too old! Minimum required: Node.js 16+"
+        Write-Host "Please upgrade Node.js from https://nodejs.org/" -ForegroundColor Yellow
+        exit 1
+    }
     Write-Success "Node.js $nodeVersion found"
 } catch {
-    Write-ErrorMsg "Node.js not found!"
-    Write-Host "Please install Node.js from https://nodejs.org/" -ForegroundColor Yellow
+    Write-ErrorMsg "Node.js not found or invalid!"
+    Write-Host "Please install Node.js 16+ from https://nodejs.org/" -ForegroundColor Yellow
     exit 1
 }
 
@@ -212,14 +243,56 @@ if ($port5173InUse) {
 Write-Progress "Starting backend API..."
 try {
     $backendPath = Join-Path $PWD "backend"
-    $script:BackendProcess = Start-Process -FilePath "$backendPath\venv\Scripts\python.exe" `
-        -ArgumentList "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000" `
-        -WorkingDirectory $backendPath `
-        -PassThru `
-        -WindowStyle Minimized
+    $logFile = Join-Path $backendPath "startup.log"
+    $errorLogFile = Join-Path $backendPath "startup_errors.log"
+
+    # Start backend with visible console by default, or quiet mode with logs only
+    if ($Quiet) {
+        # Quiet mode: redirect output to log files only
+        $script:BackendProcess = Start-Process -FilePath "$backendPath\venv\Scripts\python.exe" `
+            -ArgumentList "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000" `
+            -WorkingDirectory $backendPath `
+            -PassThru `
+            -WindowStyle Minimized `
+            -RedirectStandardError $errorLogFile `
+            -RedirectStandardOutput $logFile
+    } else {
+        # Default: Show console and also log to file using Tee-Object
+        # Set ErrorActionPreference to SilentlyContinue to avoid PowerShell formatting stderr as errors
+        $backendCmd = "`$ErrorActionPreference='SilentlyContinue'; cd '$backendPath'; .\venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000 2>&1 | Tee-Object -FilePath 'startup.log'"
+        $script:BackendProcess = Start-Process -FilePath "powershell.exe" `
+            -ArgumentList "-NoExit", "-Command", $backendCmd `
+            -WorkingDirectory $backendPath `
+            -PassThru `
+            -WindowStyle Normal
+    }
 
     # Give the process a moment to start
     Start-Sleep -Seconds 2
+
+    # Check if process is still alive
+    if (-not (Get-Process -Id $script:BackendProcess.Id -ErrorAction SilentlyContinue)) {
+        Write-ErrorMsg "Backend process crashed immediately after startup"
+
+        if (Test-Path $errorLogFile) {
+            $errorContent = Get-Content $errorLogFile -Raw -ErrorAction SilentlyContinue
+            if ($errorContent -and $errorContent.Trim()) {
+                Write-Host "`nErrors from startup_errors.log:" -ForegroundColor Yellow
+                Get-Content $errorLogFile -Tail 20 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+            }
+        }
+
+        if (Test-Path $logFile) {
+            $logContent = Get-Content $logFile -Raw -ErrorAction SilentlyContinue
+            if ($logContent -and $logContent.Trim()) {
+                Write-Host "`nOutput from startup.log:" -ForegroundColor Yellow
+                Get-Content $logFile -Tail 20 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+            }
+        }
+
+        Stop-Services
+        exit 1
+    }
 
     # Wait for backend to be ready
     $maxAttempts = 30
@@ -227,6 +300,30 @@ try {
     $backendReady = $false
 
     while ($attempt -lt $maxAttempts) {
+        # Check if process is still alive
+        if (-not (Get-Process -Id $script:BackendProcess.Id -ErrorAction SilentlyContinue)) {
+            Write-ErrorMsg "Backend process died during startup (attempt $attempt)"
+
+            if (Test-Path $errorLogFile) {
+                $errorContent = Get-Content $errorLogFile -Raw -ErrorAction SilentlyContinue
+                if ($errorContent -and $errorContent.Trim()) {
+                    Write-Host "`nErrors from startup_errors.log:" -ForegroundColor Yellow
+                    Get-Content $errorLogFile -Tail 20 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+                }
+            }
+
+            if (Test-Path $logFile) {
+                $logContent = Get-Content $logFile -Raw -ErrorAction SilentlyContinue
+                if ($logContent -and $logContent.Trim()) {
+                    Write-Host "`nOutput from startup.log:" -ForegroundColor Yellow
+                    Get-Content $logFile -Tail 20 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+                }
+            }
+
+            Stop-Services
+            exit 1
+        }
+
         try {
             $response = Invoke-WebRequest -Uri "http://localhost:8000/health" -UseBasicParsing -TimeoutSec 1 -ErrorAction SilentlyContinue
             if ($response.StatusCode -eq 200) {
@@ -247,6 +344,26 @@ try {
 
     if (-not $backendReady) {
         Write-ErrorMsg "Backend failed to start within 30 seconds"
+        Write-Host "`nDiagnostics:" -ForegroundColor Yellow
+        Write-Host "  Process alive: $(if (Get-Process -Id $script:BackendProcess.Id -ErrorAction SilentlyContinue) {'Yes'} else {'No'})" -ForegroundColor Gray
+        Write-Host "  Port 8000 listening: $(if (Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue) {'Yes'} else {'No'})" -ForegroundColor Gray
+
+        if (Test-Path $errorLogFile) {
+            $errorContent = Get-Content $errorLogFile -Raw -ErrorAction SilentlyContinue
+            if ($errorContent -and $errorContent.Trim()) {
+                Write-Host "`nErrors from startup_errors.log:" -ForegroundColor Yellow
+                Get-Content $errorLogFile -Tail 20 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+            }
+        }
+
+        if (Test-Path $logFile) {
+            $logContent = Get-Content $logFile -Raw -ErrorAction SilentlyContinue
+            if ($logContent -and $logContent.Trim()) {
+                Write-Host "`nOutput from startup.log:" -ForegroundColor Yellow
+                Get-Content $logFile -Tail 20 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+            }
+        }
+
         Stop-Services
         exit 1
     }
@@ -263,14 +380,36 @@ try {
 Write-Progress "Starting frontend..."
 try {
     $frontendPath = Join-Path $PWD "frontend"
-    $script:FrontendProcess = Start-Process -FilePath "powershell.exe" `
-        -ArgumentList "-NoExit", "-Command", "cd '$frontendPath'; npm run dev" `
-        -WorkingDirectory $frontendPath `
-        -PassThru `
-        -WindowStyle Minimized
+    $frontendLogFile = Join-Path $frontendPath "startup.log"
+
+    # Start frontend with visible console by default, or quiet mode with logs only
+    if ($Quiet) {
+        # Quiet mode: minimize window, log to file only
+        $script:FrontendProcess = Start-Process -FilePath "powershell.exe" `
+            -ArgumentList "-NoExit", "-Command", "cd '$frontendPath'; npm run dev 2>&1 | Tee-Object -FilePath 'startup.log'" `
+            -WorkingDirectory $frontendPath `
+            -PassThru `
+            -WindowStyle Minimized
+    } else {
+        # Default: Show console and also log to file
+        $script:FrontendProcess = Start-Process -FilePath "powershell.exe" `
+            -ArgumentList "-NoExit", "-Command", "cd '$frontendPath'; npm run dev 2>&1 | Tee-Object -FilePath 'startup.log'" `
+            -WorkingDirectory $frontendPath `
+            -PassThru `
+            -WindowStyle Normal
+    }
 
     # Give the process a moment to start
     Start-Sleep -Seconds 2
+
+    # Check if process is still alive
+    if (-not (Get-Process -Id $script:FrontendProcess.Id -ErrorAction SilentlyContinue)) {
+        Write-ErrorMsg "Frontend process crashed immediately after startup"
+        Write-Host "`nLast 20 lines of startup.log:" -ForegroundColor Yellow
+        Get-Content $frontendLogFile -Tail 20 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+        Stop-Services
+        exit 1
+    }
 
     # Wait for frontend to be ready
     $maxAttempts = 30
@@ -278,6 +417,15 @@ try {
     $frontendReady = $false
 
     while ($attempt -lt $maxAttempts) {
+        # Check if process is still alive
+        if (-not (Get-Process -Id $script:FrontendProcess.Id -ErrorAction SilentlyContinue)) {
+            Write-ErrorMsg "Frontend process died during startup (attempt $attempt)"
+            Write-Host "`nLast 20 lines of startup.log:" -ForegroundColor Yellow
+            Get-Content $frontendLogFile -Tail 20 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+            Stop-Services
+            exit 1
+        }
+
         try {
             $connection = Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue
             if ($connection) {
@@ -291,6 +439,11 @@ try {
 
     if (-not $frontendReady) {
         Write-ErrorMsg "Frontend failed to start within 30 seconds"
+        Write-Host "`nDiagnostics:" -ForegroundColor Yellow
+        Write-Host "  Process alive: $(if (Get-Process -Id $script:FrontendProcess.Id -ErrorAction SilentlyContinue) {'Yes'} else {'No'})" -ForegroundColor Gray
+        Write-Host "  Port 5173 listening: $(if (Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue) {'Yes'} else {'No'})" -ForegroundColor Gray
+        Write-Host "`nLast 20 lines of startup.log:" -ForegroundColor Yellow
+        Get-Content $frontendLogFile -Tail 20 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
         Stop-Services
         exit 1
     }

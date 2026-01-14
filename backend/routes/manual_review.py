@@ -10,8 +10,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
-from database import get_db
-from models.database import Stock
+from models.database import Stock, get_db
 from services.agents.manual_review_agent import ManualReviewAgent
 
 router = APIRouter()

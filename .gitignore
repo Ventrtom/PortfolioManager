@@ -57,6 +57,7 @@ Thumbs.db
 *_output.txt
 *_test_results.json
 console_output.txt
+startup_errors.log
 
 # Data files
 *.csv
