@@ -66,7 +66,10 @@ class EnrichmentService:
                     stock.volume = result.volume
                     stock.last_updated = datetime.utcnow()
 
-                    # Store alternative symbols
+                    # Store the resolved symbol (what actually worked)
+                    stock.resolved_symbol = result.resolved_symbol
+
+                    # Store alternative symbols for history
                     if result.alternative_symbols:
                         stock.alternative_symbols = json.dumps(result.alternative_symbols)
 
@@ -208,6 +211,9 @@ class EnrichmentService:
             stock.market_cap = market_cap
             stock.volume = volume
             stock.last_updated = datetime.utcnow()
+
+            # Store the resolved symbol (what actually worked)
+            stock.resolved_symbol = working_symbol
 
             # Store alternative symbols if different from original
             if working_symbol != ticker or resolution['alternative_symbols']:

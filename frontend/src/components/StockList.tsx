@@ -308,6 +308,9 @@ const StockList = () => {
                 <tr key={stock.ticker} className={isEditing ? 'editing-row' : ''}>
                   <td>
                     <strong>{stock.ticker}</strong>
+                    {stock.resolved_symbol && stock.resolved_symbol !== stock.ticker && (
+                      <span className="resolved-ticker"> ({stock.resolved_symbol})</span>
+                    )}
                   </td>
 
                   <td>

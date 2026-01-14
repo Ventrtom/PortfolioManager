@@ -180,6 +180,7 @@ export interface SnapshotHistoryItem {
 // Stock types
 export interface Stock {
   ticker: string;
+  resolved_symbol: string | null;
   company_name: string | null;
   sector: string | null;
   industry: string | null;

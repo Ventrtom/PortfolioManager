@@ -659,6 +659,13 @@ tr:hover {
   background-color: #f9fafb;
 }
 
+.resolved-ticker {
+  font-weight: normal;
+  color: #6b7280;
+  font-size: 0.9em;
+  margin-left: 4px;
+}
+
 .editing-row {
   background-color: #eff6ff !important;
 }

@@ -345,6 +345,9 @@ Keep responses brief and actionable. Use a friendly, professional tone."""
             stock.volume = stock_info.get('volume')
             stock.last_updated = datetime.utcnow()
 
+            # Store the resolved symbol (what actually worked)
+            stock.resolved_symbol = resolved_ticker
+
             # Store alternative symbols mapping
             import json
             stock.alternative_symbols = json.dumps([resolved_ticker])

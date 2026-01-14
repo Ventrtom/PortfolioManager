@@ -106,6 +106,7 @@ class StockService:
 
             result.append({
                 'ticker': stock.ticker,
+                'resolved_symbol': stock.resolved_symbol,
                 'company_name': stock.company_name,
                 'sector': stock.sector,
                 'industry': stock.industry,
@@ -121,7 +122,12 @@ class StockService:
                 'holdings_quantity': holding_data['quantity'],
                 'holdings_value': holding_data['market_value'],
                 'cost_basis': holding_data['cost_basis'],
-                'unrealized_gain': holding_data['unrealized_gain']
+                'unrealized_gain': holding_data['unrealized_gain'],
+                # Price fetch skip flags
+                'skip_price_fetch': stock.skip_price_fetch,
+                'skip_price_reason': stock.skip_price_reason,
+                'skip_price_since': stock.skip_price_since.isoformat() if stock.skip_price_since else None,
+                'consecutive_failures': stock.consecutive_failures
             })
 
         return result
