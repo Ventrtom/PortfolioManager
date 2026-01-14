@@ -1444,6 +1444,44 @@ tr:hover {
   font-size: 1.25rem;
 }
 
+/* Exchange Rate Status Badges */
+.exchange-rate-badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 4px;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.exchange-rate-badge:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.exchange-rate-partial {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fbbf24;
+}
+
+.exchange-rate-partial:hover:not(:disabled) {
+  background: #fde68a;
+}
+
+.exchange-rate-review {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+.exchange-rate-review:hover:not(:disabled) {
+  background: #fecaca;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .dashboard-grid {

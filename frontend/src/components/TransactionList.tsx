@@ -1,9 +1,50 @@
 import { useEffect, useState, useMemo } from 'react';
 import { transactionAPI } from '../api/client';
-import type { Transaction, TransactionCreate, Currency } from '../types';
+import type { Transaction, TransactionCreate, Currency, ExchangeRateStatus } from '../types';
 import { formatCurrency, formatShortDate } from '../utils/formatters';
 import { validateTransactionEdit, formatValidationErrors } from '../utils/validation';
 import CurrencySelector from './shared/CurrencySelector';
+
+// Exchange rate status indicator component
+const ExchangeRateStatusBadge = ({
+  status,
+  onRefresh,
+  isRefreshing
+}: {
+  status?: ExchangeRateStatus;
+  onRefresh: () => void;
+  isRefreshing: boolean;
+}) => {
+  if (!status || status === 'complete') {
+    return null;
+  }
+
+  const statusConfig = {
+    partial: {
+      label: 'Rates pending',
+      className: 'exchange-rate-partial',
+      tooltip: 'Some exchange rates could not be fetched. Click to retry.'
+    },
+    pending_review: {
+      label: 'Review needed',
+      className: 'exchange-rate-review',
+      tooltip: 'Exchange rates need manual review. Click to refresh.'
+    }
+  };
+
+  const config = statusConfig[status];
+
+  return (
+    <button
+      onClick={onRefresh}
+      disabled={isRefreshing}
+      className={`exchange-rate-badge ${config.className}`}
+      title={config.tooltip}
+    >
+      {isRefreshing ? '...' : config.label}
+    </button>
+  );
+};
 
 // Types for filtering and sorting
 type SortColumn = 'transaction_date' | 'transaction_type' | 'ticker' | 'total_amount';
@@ -104,6 +145,9 @@ const TransactionList = ({ refreshTrigger }: Props) => {
   const [editData, setEditData] = useState<Partial<TransactionCreate>>({});
   const [saveLoading, setSaveLoading] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+
+  // Exchange rate refresh state
+  const [refreshingRatesId, setRefreshingRatesId] = useState<number | null>(null);
 
   // Filter state
   const [filterType, setFilterType] = useState<string>('');
@@ -217,6 +261,22 @@ const TransactionList = ({ refreshTrigger }: Props) => {
       fetchTransactions();
     } catch (err) {
       alert('Failed to delete transaction');
+    }
+  };
+
+  const handleRefreshRates = async (id: number) => {
+    try {
+      setRefreshingRatesId(id);
+      const updatedTransaction = await transactionAPI.refreshRates(id);
+      // Update the transaction in the list
+      setTransactions(prev =>
+        prev.map(txn => txn.id === id ? updatedTransaction : txn)
+      );
+    } catch (err) {
+      console.error('Failed to refresh rates:', err);
+      alert('Failed to refresh exchange rates. Please try again later.');
+    } finally {
+      setRefreshingRatesId(null);
     }
   };
 
@@ -512,6 +572,11 @@ const TransactionList = ({ refreshTrigger }: Props) => {
                       </div>
                     ) : (
                       <div className="row-actions">
+                        <ExchangeRateStatusBadge
+                          status={txn.exchange_rate_status}
+                          onRefresh={() => handleRefreshRates(txn.id)}
+                          isRefreshing={refreshingRatesId === txn.id}
+                        />
                         <button
                           onClick={() => handleEdit(txn)}
                           className="edit-btn"

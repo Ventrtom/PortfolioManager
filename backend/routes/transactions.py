@@ -168,3 +168,36 @@ def refresh_transaction_currencies(
         return CurrencyRefreshResponse(**result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{transaction_id}/refresh-rates", response_model=TransactionResponse)
+def refresh_transaction_rates(
+    transaction_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Retry exchange rate resolution for a specific transaction.
+    Use this to refresh rates for transactions with partial or missing exchange rate data.
+    """
+    # First check if transaction exists
+    transaction = TransactionService.get_transaction(db, transaction_id)
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    try:
+        result = TransactionService.refresh_currency_amounts(
+            db,
+            transaction_ids=[transaction_id]
+        )
+
+        if result['failed'] > 0:
+            # Refresh failed but transaction still exists - return it with current state
+            db.refresh(transaction)
+            return transaction
+
+        # Refresh successful - return updated transaction
+        db.refresh(transaction)
+        return transaction
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to refresh rates: {str(e)}")

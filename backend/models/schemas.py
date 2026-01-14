@@ -57,6 +57,8 @@ class TransactionResponse(TransactionBase):
     amount_usd: Optional[float] = None
     amount_eur: Optional[float] = None
     amount_czk: Optional[float] = None
+    exchange_rate_status: Optional[str] = 'complete'  # 'complete', 'partial', 'pending_review'
+    exchange_rate_notes: Optional[str] = None  # JSON with details about missing/flagged rates
     created_at: datetime
     updated_at: datetime
 

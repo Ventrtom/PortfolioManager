@@ -3,6 +3,7 @@ from models.database import Transaction
 from models.schemas import TransactionCreate, TransactionUpdate
 from datetime import datetime
 from typing import List, Optional, Dict
+import json
 
 
 class TransactionService:
@@ -49,6 +50,10 @@ class TransactionService:
         transaction.total_amount = corrected_amount
 
         # Get currency amounts for all three currencies (with corrected sign)
+        # Initialize exchange rate tracking
+        exchange_rate_status = 'complete'
+        exchange_rate_notes = None
+
         if getattr(transaction, 'skip_exchange_rate_conversion', False):
             # Skip conversion for migrations - use total_amount as CZK amount
             currency_amounts = {
@@ -56,6 +61,8 @@ class TransactionService:
                 'eur': None,
                 'czk': transaction.total_amount
             }
+            exchange_rate_status = 'partial'
+            exchange_rate_notes = json.dumps({'reason': 'skipped_for_migration'})
         else:
             try:
                 # Use intelligent resolution with multi-tier fallback
@@ -73,12 +80,26 @@ class TransactionService:
                     'czk': result['czk']
                 }
 
-                # Log warnings if AI was used or manual review needed
-                if result['metadata'].get('ai_used'):
-                    logger.info(f"Exchange rate resolved using AI for transaction on {transaction.transaction_date}")
+                # Determine exchange rate status based on metadata
+                metadata = result.get('metadata', {})
 
-                if result['metadata'].get('needs_manual_review'):
+                if metadata.get('failed_conversions'):
+                    exchange_rate_status = 'partial'
+                    exchange_rate_notes = json.dumps({
+                        'failed_conversions': metadata['failed_conversions'],
+                        'warnings': metadata.get('warnings', [])
+                    })
+                    logger.warning(f"Transaction saved with partial exchange rates: {metadata['failed_conversions']}")
+                elif metadata.get('needs_manual_review'):
+                    exchange_rate_status = 'pending_review'
+                    exchange_rate_notes = json.dumps({
+                        'sources': metadata.get('sources', {}),
+                        'warnings': metadata.get('warnings', []),
+                        'ai_used': metadata.get('ai_used', False)
+                    })
                     logger.warning(f"Exchange rate needs manual review for transaction on {transaction.transaction_date}")
+                elif metadata.get('ai_used'):
+                    logger.info(f"Exchange rate resolved using AI for transaction on {transaction.transaction_date}")
 
             except Exception as e:
                 # If ALL resolution methods fail (very rare with 4-tier fallback),
@@ -97,6 +118,12 @@ class TransactionService:
                 elif txn_curr == 'CZK':
                     currency_amounts['czk'] = transaction.total_amount
 
+                exchange_rate_status = 'partial'
+                exchange_rate_notes = json.dumps({
+                    'error': str(e),
+                    'failed_conversions': [{'reason': 'all_tiers_failed'}]
+                })
+
         db_transaction = Transaction(
             transaction_type=transaction.transaction_type.upper(),
             ticker=transaction.ticker.upper() if transaction.ticker else '',  # Empty for DEPOSIT/WITHDRAWAL
@@ -111,7 +138,9 @@ class TransactionService:
             notes=transaction.notes,
             import_source=getattr(transaction, 'import_source', None),
             import_batch_id=getattr(transaction, 'import_batch_id', None),
-            broker_transaction_id=getattr(transaction, 'broker_transaction_id', None)
+            broker_transaction_id=getattr(transaction, 'broker_transaction_id', None),
+            exchange_rate_status=exchange_rate_status,
+            exchange_rate_notes=exchange_rate_notes
         )
         db.add(db_transaction)
         db.flush()  # Get ID before audit recording
@@ -390,6 +419,26 @@ class TransactionService:
                 transaction.amount_usd = currency_amounts['usd']
                 transaction.amount_eur = currency_amounts['eur']
                 transaction.amount_czk = currency_amounts['czk']
+
+                # Update exchange rate status based on refresh result
+                metadata = result.get('metadata', {})
+                if metadata.get('failed_conversions'):
+                    transaction.exchange_rate_status = 'partial'
+                    transaction.exchange_rate_notes = json.dumps({
+                        'failed_conversions': metadata['failed_conversions'],
+                        'warnings': metadata.get('warnings', []),
+                        'refreshed_at': datetime.utcnow().isoformat()
+                    })
+                elif metadata.get('needs_manual_review'):
+                    transaction.exchange_rate_status = 'pending_review'
+                    transaction.exchange_rate_notes = json.dumps({
+                        'sources': metadata.get('sources', {}),
+                        'warnings': metadata.get('warnings', []),
+                        'refreshed_at': datetime.utcnow().isoformat()
+                    })
+                else:
+                    transaction.exchange_rate_status = 'complete'
+                    transaction.exchange_rate_notes = None
 
                 updated_count += 1
 

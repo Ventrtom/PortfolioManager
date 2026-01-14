@@ -520,7 +520,8 @@ class ExchangeRateService:
                 'sources': {},
                 'ai_used': False,
                 'needs_manual_review': False,
-                'warnings': []
+                'warnings': [],
+                'failed_conversions': []
             }
         }
 
@@ -562,16 +563,16 @@ class ExchangeRateService:
                     logger.info(warning)
 
             else:
-                # All tiers failed
-                raise Exception(
-                    f"Unable to resolve exchange rate for {transaction_currency}/{target_currency} on {rate_date}. "
-                    f"All resolution methods failed:\n"
-                    f"1. Database cache - not found\n"
-                    f"2. API providers - all unavailable\n"
-                    f"3. AI agent - could not determine rate\n"
-                    f"4. Historical fallback - no previous rates\n"
-                    f"Please check your network connection, API keys, and try again."
-                )
+                # All tiers failed - log warning but don't block transaction
+                # The target currency amount remains None (already initialized)
+                warning = f"Could not resolve rate for {transaction_currency}/{target_currency} on {rate_date}"
+                result['metadata']['warnings'].append(warning)
+                result['metadata']['failed_conversions'].append({
+                    'base': transaction_currency,
+                    'target': target_currency,
+                    'date': str(rate_date)
+                })
+                logger.warning(f"[All Tiers Failed] {warning}. Transaction will be saved with partial currency data.")
 
         return result
 

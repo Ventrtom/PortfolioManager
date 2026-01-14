@@ -512,14 +512,24 @@ class TransactionValidator:
             transaction_data.transaction_date
         )
 
-        # Convert transaction amount to CZK
-        currency_amounts = ExchangeRateService.get_all_currency_amounts(
-            amount=transaction_data.total_amount,
-            transaction_currency=transaction_data.transaction_currency,
-            rate_date=transaction_data.transaction_date,
-            db=db
-        )
-        amount_czk = currency_amounts['czk']
+        # Convert transaction amount to CZK using intelligent resolution
+        # If exchange rate is unavailable, skip cash validation rather than blocking
+        try:
+            currency_amounts = ExchangeRateService.get_all_currency_amounts_intelligent(
+                amount=transaction_data.total_amount,
+                transaction_currency=transaction_data.transaction_currency,
+                rate_date=transaction_data.transaction_date,
+                db=db
+            )
+            amount_czk = currency_amounts.get('czk')
+
+            # If CZK conversion failed, skip validation
+            if amount_czk is None:
+                return errors
+        except Exception:
+            # If exchange rate resolution fails completely, skip cash validation
+            # Transaction will be saved and user can refresh rates later
+            return errors
 
         # STRICT MODE: Check if sufficient cash (no overdraft allowed)
         if cash_balance_at_date < amount_czk:
@@ -558,14 +568,24 @@ class TransactionValidator:
             transaction_data.transaction_date
         )
 
-        # Convert withdrawal amount to CZK (take absolute value since stored as negative)
-        currency_amounts = ExchangeRateService.get_all_currency_amounts(
-            amount=abs(transaction_data.total_amount),
-            transaction_currency=transaction_data.transaction_currency,
-            rate_date=transaction_data.transaction_date,
-            db=db
-        )
-        withdrawal_amount_czk = currency_amounts['czk']
+        # Convert withdrawal amount to CZK using intelligent resolution
+        # If exchange rate is unavailable, skip cash validation rather than blocking
+        try:
+            currency_amounts = ExchangeRateService.get_all_currency_amounts_intelligent(
+                amount=abs(transaction_data.total_amount),
+                transaction_currency=transaction_data.transaction_currency,
+                rate_date=transaction_data.transaction_date,
+                db=db
+            )
+            withdrawal_amount_czk = currency_amounts.get('czk')
+
+            # If CZK conversion failed, skip validation
+            if withdrawal_amount_czk is None:
+                return errors
+        except Exception:
+            # If exchange rate resolution fails completely, skip cash validation
+            # Transaction will be saved and user can refresh rates later
+            return errors
 
         # Check if sufficient cash for withdrawal
         if cash_balance_at_date < withdrawal_amount_czk:

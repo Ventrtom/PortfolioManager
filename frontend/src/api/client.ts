@@ -72,6 +72,11 @@ export const transactionAPI = {
     });
     return response.data;
   },
+
+  refreshRates: async (transactionId: number): Promise<Transaction> => {
+    const response = await apiClient.post(`/transactions/${transactionId}/refresh-rates`);
+    return response.data;
+  },
 };
 
 // Portfolio API

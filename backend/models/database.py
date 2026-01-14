@@ -44,6 +44,10 @@ class Transaction(Base):
     import_batch_id = Column(String, nullable=True)  # Timestamp or batch identifier
     broker_transaction_id = Column(String, nullable=True, index=True)  # Original broker ID
 
+    # Exchange rate status tracking
+    exchange_rate_status = Column(String, default='complete')  # 'complete', 'partial', 'pending_review'
+    exchange_rate_notes = Column(Text, nullable=True)  # JSON with details about missing/flagged rates
+
     __table_args__ = (
         Index('ix_transactions_ticker_date_type', 'ticker', 'transaction_date', 'transaction_type'),
     )

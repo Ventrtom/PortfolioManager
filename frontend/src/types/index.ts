@@ -4,6 +4,8 @@ export type Currency = 'USD' | 'EUR' | 'CZK';
 // Transaction types
 export type TransactionType = 'BUY' | 'SELL' | 'DIVIDEND' | 'FEE' | 'TAX' | 'DEPOSIT' | 'WITHDRAWAL' | 'INTEREST' | 'SPLIT';
 
+export type ExchangeRateStatus = 'complete' | 'partial' | 'pending_review';
+
 export interface Transaction {
   id: number;
   transaction_type: TransactionType;
@@ -15,6 +17,8 @@ export interface Transaction {
   amount_usd?: number | null;
   amount_eur?: number | null;
   amount_czk?: number | null;
+  exchange_rate_status?: ExchangeRateStatus;
+  exchange_rate_notes?: string | null;
   transaction_date: string;
   notes?: string | null;
   created_at: string;
