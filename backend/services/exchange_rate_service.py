@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
 from models.database import ExchangeRate, Transaction
 import logging
+import json
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -197,6 +198,180 @@ class ExchangeRateService:
         return all_rates
 
     @staticmethod
+    def get_exchange_rate_intelligent(
+        base_currency: str,
+        target_currency: str,
+        rate_date: date,
+        db: Session
+    ) -> Optional[Dict]:
+        """
+        Intelligent exchange rate resolution with 4-tier fallback:
+        1. Database cache
+        2. Multi-provider APIs
+        3. AI Agent with web search
+        4. Historical fallback
+
+        Args:
+            base_currency: Source currency (USD, EUR, CZK)
+            target_currency: Target currency (USD, EUR, CZK)
+            rate_date: Date for exchange rate
+            db: Database session
+
+        Returns:
+            Dict with rate info or None:
+            {
+                'rate': float,
+                'source': str,
+                'confidence': str,
+                'ai_used': bool,
+                'needs_manual_review': bool,
+                'ai_sources': List[str],  # URLs from AI search
+                'tier': int  # Which tier was used (1-4)
+            }
+        """
+        logger.info(f"[Intelligent Resolution] {base_currency}/{target_currency} on {rate_date}")
+
+        # Same currency check
+        if base_currency == target_currency:
+            return {
+                'rate': 1.0,
+                'source': 'identity',
+                'confidence': 'high',
+                'ai_used': False,
+                'needs_manual_review': False,
+                'ai_sources': [],
+                'tier': 0
+            }
+
+        # TIER 1: Check database cache
+        logger.info(f"[Tier 1] Checking database cache")
+        cached_rate = db.query(ExchangeRate).filter(
+            ExchangeRate.base_currency == base_currency,
+            ExchangeRate.target_currency == target_currency,
+            ExchangeRate.rate_date == rate_date
+        ).first()
+
+        if cached_rate:
+            logger.info(f"[Tier 1] Found cached rate: {cached_rate.rate} from {cached_rate.source}")
+            return {
+                'rate': cached_rate.rate,
+                'source': cached_rate.source,
+                'confidence': cached_rate.confidence or 'high',
+                'ai_used': cached_rate.ai_used or False,
+                'needs_manual_review': cached_rate.needs_manual_review or False,
+                'ai_sources': json.loads(cached_rate.ai_sources) if cached_rate.ai_sources else [],
+                'tier': 1
+            }
+
+        # TIER 2: Try multi-provider APIs
+        logger.info(f"[Tier 2] Trying multi-provider APIs")
+        try:
+            from services.multi_provider_exchange_service import MultiProviderExchangeService
+            multi_provider = MultiProviderExchangeService()
+            provider_result = multi_provider.get_exchange_rate(base_currency, target_currency, rate_date)
+
+            if provider_result and provider_result.get('rate'):
+                logger.info(f"[Tier 2] Successfully fetched from {provider_result['source']}")
+
+                # Cache in database
+                new_rate = ExchangeRate(
+                    base_currency=base_currency,
+                    target_currency=target_currency,
+                    rate_date=rate_date,
+                    rate=provider_result['rate'],
+                    source=provider_result['source'],
+                    confidence='high',
+                    ai_used=False,
+                    needs_manual_review=False,
+                    fetched_at=datetime.utcnow()
+                )
+                db.add(new_rate)
+                db.commit()
+
+                return {
+                    'rate': provider_result['rate'],
+                    'source': provider_result['source'],
+                    'confidence': 'high',
+                    'ai_used': False,
+                    'needs_manual_review': False,
+                    'ai_sources': [],
+                    'tier': 2
+                }
+        except Exception as e:
+            logger.error(f"[Tier 2] Multi-provider service failed: {e}")
+
+        # TIER 3: Use AI Agent with web search
+        logger.info(f"[Tier 3] Invoking AI Agent with web search")
+        try:
+            from services.agents.exchange_rate_agent import ExchangeRateAgent
+            ai_agent = ExchangeRateAgent()
+            ai_result = ai_agent.get_historical_rate(base_currency, target_currency, rate_date)
+
+            if ai_result.rate is not None:
+                logger.info(f"[Tier 3] AI Agent found rate: {ai_result.rate}, confidence: {ai_result.confidence}")
+
+                # Cache in database with AI metadata
+                new_rate = ExchangeRate(
+                    base_currency=base_currency,
+                    target_currency=target_currency,
+                    rate_date=rate_date,
+                    rate=ai_result.rate,
+                    source='ai-agent',
+                    confidence=ai_result.confidence,
+                    ai_used=True,
+                    ai_sources=json.dumps(ai_result.sources),
+                    needs_manual_review=ai_result.needs_manual_review,
+                    manual_review_reason=ai_result.reasoning if ai_result.needs_manual_review else None,
+                    fetched_at=datetime.utcnow()
+                )
+                db.add(new_rate)
+                db.commit()
+
+                return {
+                    'rate': ai_result.rate,
+                    'source': 'ai-agent',
+                    'confidence': ai_result.confidence,
+                    'ai_used': True,
+                    'needs_manual_review': ai_result.needs_manual_review,
+                    'ai_sources': ai_result.sources,
+                    'tier': 3
+                }
+            else:
+                logger.warning(f"[Tier 3] AI Agent could not determine rate")
+
+        except Exception as e:
+            logger.error(f"[Tier 3] AI Agent failed: {e}", exc_info=True)
+
+        # TIER 4: Historical fallback (last known rate)
+        logger.info(f"[Tier 4] Trying historical fallback")
+        last_rate = ExchangeRateService.get_last_known_rate(
+            base_currency,
+            target_currency,
+            rate_date,
+            db
+        )
+
+        if last_rate:
+            last_date, rate_value = last_rate
+            days_stale = (rate_date - last_date).days
+            logger.warning(
+                f"[Tier 4] Using stale rate from {last_date} ({days_stale} days old): {rate_value}"
+            )
+
+            return {
+                'rate': rate_value,
+                'source': f'historical-{days_stale}d',
+                'confidence': 'low' if days_stale > 30 else 'medium',
+                'ai_used': False,
+                'needs_manual_review': days_stale > 90,  # Flag very stale rates
+                'ai_sources': [],
+                'tier': 4
+            }
+
+        logger.error(f"[All Tiers Failed] Could not resolve {base_currency}/{target_currency} on {rate_date}")
+        return None
+
+    @staticmethod
     def convert_amount(
         amount: float,
         from_currency: str,
@@ -295,6 +470,108 @@ class ExchangeRateService:
                 )
 
             result[target_currency.lower()] = converted
+
+        return result
+
+    @staticmethod
+    def get_all_currency_amounts_intelligent(
+        amount: float,
+        transaction_currency: str,
+        rate_date: date,
+        db: Session
+    ) -> Dict:
+        """
+        Convert a transaction amount to all three currencies using intelligent resolution.
+        Uses 4-tier fallback system (cache, APIs, AI, historical).
+
+        Args:
+            amount: Transaction amount in transaction_currency
+            transaction_currency: Currency of the transaction (USD, EUR, or CZK)
+            rate_date: Date of transaction
+            db: Database session
+
+        Returns:
+            Dict with currency amounts and metadata:
+            {
+                'usd': float,
+                'eur': float,
+                'czk': float,
+                'metadata': {
+                    'sources': {...},  # Which source was used for each conversion
+                    'ai_used': bool,
+                    'needs_manual_review': bool,
+                    'warnings': [...]
+                }
+            }
+
+        Raises:
+            Exception if all resolution methods fail
+        """
+        transaction_currency = transaction_currency.upper()
+        if transaction_currency not in ExchangeRateService.SUPPORTED_CURRENCIES:
+            raise ValueError(f"Unsupported currency: {transaction_currency}")
+
+        # Initialize result
+        result = {
+            'usd': None,
+            'eur': None,
+            'czk': None,
+            'metadata': {
+                'sources': {},
+                'ai_used': False,
+                'needs_manual_review': False,
+                'warnings': []
+            }
+        }
+
+        # Set the transaction currency amount directly
+        result[transaction_currency.lower()] = round(amount, 2)
+        result['metadata']['sources'][transaction_currency.lower()] = 'identity'
+
+        # Convert to other currencies using intelligent resolution
+        for target_currency in ExchangeRateService.SUPPORTED_CURRENCIES:
+            if target_currency == transaction_currency:
+                continue  # Already set
+
+            rate_info = ExchangeRateService.get_exchange_rate_intelligent(
+                transaction_currency,
+                target_currency,
+                rate_date,
+                db
+            )
+
+            if rate_info and rate_info.get('rate'):
+                converted = round(amount * rate_info['rate'], 2)
+                result[target_currency.lower()] = converted
+
+                # Track metadata
+                result['metadata']['sources'][target_currency.lower()] = rate_info.get('source', 'unknown')
+
+                if rate_info.get('ai_used'):
+                    result['metadata']['ai_used'] = True
+
+                if rate_info.get('needs_manual_review'):
+                    result['metadata']['needs_manual_review'] = True
+                    warning = f"Rate for {transaction_currency}/{target_currency} needs manual review"
+                    result['metadata']['warnings'].append(warning)
+                    logger.warning(warning)
+
+                if rate_info.get('tier', 0) >= 3:
+                    warning = f"Used tier {rate_info['tier']} resolution for {transaction_currency}/{target_currency}"
+                    result['metadata']['warnings'].append(warning)
+                    logger.info(warning)
+
+            else:
+                # All tiers failed
+                raise Exception(
+                    f"Unable to resolve exchange rate for {transaction_currency}/{target_currency} on {rate_date}. "
+                    f"All resolution methods failed:\n"
+                    f"1. Database cache - not found\n"
+                    f"2. API providers - all unavailable\n"
+                    f"3. AI agent - could not determine rate\n"
+                    f"4. Historical fallback - no previous rates\n"
+                    f"Please check your network connection, API keys, and try again."
+                )
 
         return result
 

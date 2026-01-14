@@ -58,17 +58,33 @@ class TransactionService:
             }
         else:
             try:
-                currency_amounts = ExchangeRateService.get_all_currency_amounts(
+                # Use intelligent resolution with multi-tier fallback
+                result = ExchangeRateService.get_all_currency_amounts_intelligent(
                     amount=transaction.total_amount,
                     transaction_currency=transaction.transaction_currency,
                     rate_date=transaction.transaction_date,
                     db=db
                 )
+
+                # Extract currency amounts (metadata is separate)
+                currency_amounts = {
+                    'usd': result['usd'],
+                    'eur': result['eur'],
+                    'czk': result['czk']
+                }
+
+                # Log warnings if AI was used or manual review needed
+                if result['metadata'].get('ai_used'):
+                    logger.info(f"Exchange rate resolved using AI for transaction on {transaction.transaction_date}")
+
+                if result['metadata'].get('needs_manual_review'):
+                    logger.warning(f"Exchange rate needs manual review for transaction on {transaction.transaction_date}")
+
             except Exception as e:
-                # If exchange rate fetch fails (network issues, API down, etc.),
+                # If ALL resolution methods fail (very rare with 4-tier fallback),
                 # store the transaction with only the original currency amount
-                # User can refresh rates later when network is available
-                logger.warning(f"Failed to fetch exchange rates: {e}")
+                # User can refresh rates later
+                logger.warning(f"Failed to fetch exchange rates after trying all methods: {e}")
                 logger.info("Saving transaction with partial currency data. You can refresh rates later using /api/transactions/refresh-currencies")
 
                 # Set the amount in the transaction currency only
@@ -215,12 +231,17 @@ class TransactionService:
             from services.exchange_rate_service import ExchangeRateService
 
             try:
-                currency_amounts = ExchangeRateService.get_all_currency_amounts(
+                result = ExchangeRateService.get_all_currency_amounts_intelligent(
                     amount=db_transaction.total_amount,
                     transaction_currency=db_transaction.transaction_currency,
                     rate_date=db_transaction.transaction_date,
                     db=db
                 )
+                currency_amounts = {
+                    'usd': result['usd'],
+                    'eur': result['eur'],
+                    'czk': result['czk']
+                }
 
                 db_transaction.amount_usd = currency_amounts['usd']
                 db_transaction.amount_eur = currency_amounts['eur']
@@ -353,13 +374,18 @@ class TransactionService:
                 if not transaction.transaction_currency:
                     transaction.transaction_currency = 'USD'  # Default for old records
 
-                # Recalculate currency amounts
-                currency_amounts = ExchangeRateService.get_all_currency_amounts(
+                # Recalculate currency amounts using intelligent resolution
+                result = ExchangeRateService.get_all_currency_amounts_intelligent(
                     amount=transaction.total_amount,
                     transaction_currency=transaction.transaction_currency,
                     rate_date=transaction.transaction_date,
                     db=db
                 )
+                currency_amounts = {
+                    'usd': result['usd'],
+                    'eur': result['eur'],
+                    'czk': result['czk']
+                }
 
                 transaction.amount_usd = currency_amounts['usd']
                 transaction.amount_eur = currency_amounts['eur']

@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, Float, String, Date, DateTime, Text, Boolean, Index
+from sqlalchemy import create_engine, Column, Integer, Float, String, Date, DateTime, Text, Boolean, Index, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -52,7 +52,14 @@ class Transaction(Base):
 class Stock(Base):
     __tablename__ = "stocks"
 
+    # Primary identifier - user's original input
     ticker = Column(String, primary_key=True, index=True)
+
+    # Ticker mapping - the symbol that actually works with APIs
+    resolved_symbol = Column(String, nullable=True)  # Symbol used for data fetching
+    alternative_symbols = Column(Text, nullable=True)  # JSON array: ["GEO", "GEO:US"]
+
+    # Company info
     company_name = Column(String, nullable=True)
     sector = Column(String, nullable=True)
     industry = Column(String, nullable=True)
@@ -62,7 +69,6 @@ class Stock(Base):
     # Stock enrichment fields
     market_cap = Column(Float, nullable=True)
     volume = Column(Integer, nullable=True)
-    alternative_symbols = Column(Text, nullable=True)  # JSON array: ["GEO", "GEO:US"]
     enrichment_status = Column(String, default='pending')  # 'pending', 'in_progress', 'complete', 'failed', 'manual'
     enrichment_attempts = Column(Integer, default=0)
     enrichment_error = Column(Text, nullable=True)
@@ -98,6 +104,13 @@ class ExchangeRate(Base):
     rate = Column(Float, nullable=False)  # Exchange rate value
     source = Column(String, default="exchangerate-api.io")  # API source
     fetched_at = Column(DateTime, default=datetime.utcnow)  # When we fetched it
+
+    # AI tracking fields
+    confidence = Column(String, nullable=True)  # 'high', 'medium', 'low'
+    ai_used = Column(Boolean, default=False)
+    ai_sources = Column(JSON, nullable=True)  # List of URLs for AI results
+    needs_manual_review = Column(Boolean, default=False)
+    manual_review_reason = Column(String, nullable=True)
 
     __table_args__ = (
         Index('ix_exchange_rates_lookup', 'base_currency', 'target_currency', 'rate_date'),

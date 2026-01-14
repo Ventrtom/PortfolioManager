@@ -7,7 +7,7 @@ load_dotenv()
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from models.database import init_db
-from routes import transactions, portfolio, analytics, stocks, manual_review
+from routes import transactions, portfolio, analytics, stocks, manual_review, manual_review_exchange
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -40,6 +40,7 @@ app.include_router(portfolio.router, prefix="/api/portfolio", tags=["Portfolio"]
 app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
 app.include_router(stocks.router, prefix="/api/stocks", tags=["Stocks"])
 app.include_router(manual_review.router, tags=["Manual Review"])
+app.include_router(manual_review_exchange.router, tags=["Exchange Rate Review"])
 
 # Health check endpoint
 @app.get("/")
