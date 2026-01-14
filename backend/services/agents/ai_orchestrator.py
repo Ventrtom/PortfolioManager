@@ -152,7 +152,9 @@ class AIOrchestrator:
             stock_info.get('market_cap')
         ])
 
-        ai_enrichment_used = False
+        # Track if AI was used (either for ticker resolution or data enrichment)
+        ai_used_for_resolution = resolution['method'] in ['ai', 'ai_successor']
+        ai_enrichment_used = ai_used_for_resolution  # Start with resolution AI usage
         ai_confidence = None
 
         if has_gaps:
@@ -171,6 +173,7 @@ class AIOrchestrator:
                 stock_info['industry'] = enrichment.industry or stock_info.get('industry')
                 stock_info['market_cap'] = enrichment.market_cap or stock_info.get('market_cap')
 
+                # AI was used for data enrichment (in addition to possibly being used for resolution)
                 ai_enrichment_used = True
                 ai_confidence = enrichment.confidence
 
@@ -213,9 +216,18 @@ class AIOrchestrator:
             error=None
         )
 
+        # Build AI usage description for logging
+        ai_usage_desc = []
+        if ai_used_for_resolution:
+            ai_usage_desc.append(f"resolution ({resolution['method']})")
+        if has_gaps and ai_confidence:
+            ai_usage_desc.append(f"data enrichment ({ai_confidence} confidence)")
+
+        ai_usage_str = " + ".join(ai_usage_desc) if ai_usage_desc else "not used"
+
         logger.info(
             f"[AI Orchestrator] Enrichment complete for {ticker}: "
-            f"status={status}, ai_used={ai_enrichment_used}"
+            f"status={status}, ai={ai_usage_str}"
         )
 
         return result
