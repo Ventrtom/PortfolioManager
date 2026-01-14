@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { stockAPI } from '../api/client';
 import type { Stock, StockFilterCriteria } from '../types';
+import ManualReviewChat from './ManualReviewChat';
 
 const StockList = () => {
   const [stocks, setStocks] = useState<Stock[]>([]);
@@ -23,6 +24,10 @@ const StockList = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newTicker, setNewTicker] = useState('');
   const [createLoading, setCreateLoading] = useState(false);
+
+  // Manual review chat state
+  const [showManualReviewChat, setShowManualReviewChat] = useState(false);
+  const [manualReviewTicker, setManualReviewTicker] = useState<string | null>(null);
 
   // Filter options
   const [sectors, setSectors] = useState<string[]>([]);
@@ -166,7 +171,23 @@ const StockList = () => {
     return 'inherit';
   };
 
-  const getStatusBadge = (status: string) => {
+  const handleOpenManualReview = (ticker: string) => {
+    setManualReviewTicker(ticker);
+    setShowManualReviewChat(true);
+  };
+
+  const handleCloseManualReview = () => {
+    setShowManualReviewChat(false);
+    setManualReviewTicker(null);
+  };
+
+  const handleManualReviewResolved = () => {
+    // Refresh stocks after manual review completes
+    fetchStocks();
+  };
+
+  const getStatusBadge = (stock: Stock) => {
+    const status = stock.enrichment_status;
     const colors: { [key: string]: string } = {
       complete: 'status-complete',
       pending: 'status-pending',
@@ -174,7 +195,23 @@ const StockList = () => {
       failed: 'status-failed',
       manual: 'status-manual',
     };
-    return <span className={`status-badge ${colors[status]}`}>{status}</span>;
+
+    const badge = <span className={`status-badge ${colors[status]}`}>{status}</span>;
+
+    // Make MANUAL status clickable
+    if (status === 'manual') {
+      return (
+        <span
+          className="status-badge-wrapper clickable"
+          onClick={() => handleOpenManualReview(stock.ticker)}
+          title="Click to open AI chat and resolve this ticker manually"
+        >
+          {badge}
+        </span>
+      );
+    }
+
+    return badge;
   };
 
   if (loading) {
@@ -337,7 +374,7 @@ const StockList = () => {
                     {stock.unrealized_gain !== 0 ? formatCurrency(stock.unrealized_gain) : '-'}
                   </td>
 
-                  <td>{getStatusBadge(stock.enrichment_status)}</td>
+                  <td>{getStatusBadge(stock)}</td>
 
                   <td>
                     {isEditing ? (
@@ -417,6 +454,15 @@ const StockList = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Manual Review Chat */}
+      {showManualReviewChat && manualReviewTicker && (
+        <ManualReviewChat
+          ticker={manualReviewTicker}
+          onClose={handleCloseManualReview}
+          onResolved={handleManualReviewResolved}
+        />
       )}
     </div>
   );
