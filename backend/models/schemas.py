@@ -118,7 +118,8 @@ class Holding(BaseModel):
     average_cost: float
     current_price: float
     market_value: float
-    cost_basis: float
+    cost_basis: float  # Cost in stock's native currency
+    cost_basis_czk: Optional[float] = None  # Cost normalized to CZK at transaction dates
     unrealized_gain: float
     unrealized_gain_percent: float
     sector: Optional[str] = None
