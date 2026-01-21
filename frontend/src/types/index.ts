@@ -1,6 +1,13 @@
 // Currency types
 export type Currency = 'USD' | 'EUR' | 'CZK';
 
+// Widget loading state types
+export type WidgetId = 'summary' | 'diversification' | 'volatility' | 'dividends' | 'holdings' | 'allocation';
+
+export type WidgetLoadingState = {
+  [key in WidgetId]?: boolean;
+};
+
 // Transaction types
 export type TransactionType = 'BUY' | 'SELL' | 'DIVIDEND' | 'FEE' | 'TAX' | 'DEPOSIT' | 'WITHDRAWAL' | 'INTEREST' | 'SPLIT';
 
@@ -196,11 +203,19 @@ export interface Stock {
   is_manually_edited: boolean;
   alternative_symbols: string[];
   last_updated: string | null;
-  // Portfolio context
+  // Portfolio context - native currency (usually USD)
   holdings_quantity: number;
-  holdings_value: number;
-  cost_basis: number;
-  unrealized_gain: number;
+  holdings_value: number;  // Market value in native currency
+  cost_basis: number;  // Cost basis in native currency
+  unrealized_gain: number;  // Unrealized gain in native currency
+  current_price: number | null;  // Current price in native currency
+  average_cost: number | null;  // Average cost per share in native currency
+  // Portfolio context - CZK (base currency for display)
+  current_price_czk: number | null;  // Current price in CZK
+  holdings_value_czk: number;  // Market value in CZK
+  cost_basis_czk: number;  // Cost basis in CZK (at transaction dates)
+  unrealized_gain_czk: number;  // Unrealized gain in CZK
+  average_cost_czk: number | null;  // Average cost per share in CZK
   // Price fetch skip flags
   skip_price_fetch: boolean;
   skip_price_reason: string | null;
@@ -214,4 +229,17 @@ export interface StockFilterCriteria {
   industry?: string;
   status?: string;
   has_holdings?: boolean;
+}
+
+// Historical Price types
+export interface HistoricalPrice {
+  ticker: string;
+  price_date: string;
+  price: number;
+}
+
+export interface HistoricalPriceSeriesResponse {
+  ticker: string;
+  prices: HistoricalPrice[];
+  count: number;
 }

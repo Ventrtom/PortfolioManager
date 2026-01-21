@@ -27,6 +27,7 @@ class ChatResponse(BaseModel):
     message: str
     actions: List[Dict[str, Any]]
     suggested_actions: List[Dict[str, Any]]
+    executed_action: Optional[Dict[str, Any]] = None  # Action executed by AI (e.g., save)
 
 
 class SaveMappingRequest(BaseModel):
@@ -95,7 +96,8 @@ def chat_with_agent(
     return ChatResponse(
         message=result['message'],
         actions=result['actions'],
-        suggested_actions=result['suggested_actions']
+        suggested_actions=result['suggested_actions'],
+        executed_action=result.get('executed_action')
     )
 
 

@@ -76,19 +76,49 @@ class TickerResolutionService:
         """
         Generate common ticker variations
         Example: GEO.US → [GEO, GEO:US, GEO-US, GEO.NYSE]
+        Example: IUIT.UK → [IUIT.UK, IUIT.L, IUIT, IUIT.LSE]
         """
         variations = [ticker]  # Include original
+        ticker_upper = ticker.upper()
 
-        # Remove common suffixes
-        if '.' in ticker:
-            base = ticker.split('.')[0]
+        # UK/European ETF format conversions
+        # Users often input .UK but Yahoo Finance uses .L for London
+        uk_eu_suffixes = {
+            '.UK': ['.L', '.LSE'],      # UK -> London Stock Exchange
+            '.LON': ['.L', '.LSE'],     # London variant
+            '.LSE': ['.L'],             # LSE -> Yahoo format
+        }
+
+        for old_suffix, new_suffixes in uk_eu_suffixes.items():
+            if ticker_upper.endswith(old_suffix):
+                base = ticker[:-len(old_suffix)]
+                for new_suffix in new_suffixes:
+                    variations.append(f"{base}{new_suffix}")
+                variations.append(base)  # Also try without suffix
+                break
+
+        # If ticker ends with .L (Yahoo London format), also try EODHD format
+        if ticker_upper.endswith('.L'):
+            base = ticker[:-2]
+            variations.append(f"{base}.LSE")
             variations.append(base)
 
-            # Try different exchange formats
+        # Remove common US suffixes
+        if '.' in ticker:
+            base = ticker.split('.')[0]
+            if base not in variations:
+                variations.append(base)
+
+            # Try different US exchange formats
             variations.append(f"{base}:US")
             variations.append(f"{base}-US")
             variations.append(f"{base}.NYSE")
             variations.append(f"{base}.NASDAQ")
+
+        # If no suffix and short ticker (likely ETF), try London formats
+        if '.' not in ticker and len(ticker) <= 5:
+            variations.append(f"{ticker}.L")    # Yahoo Finance London
+            variations.append(f"{ticker}.LSE")  # EODHD London
 
         # Remove hyphens/colons
         if '-' in ticker or ':' in ticker:

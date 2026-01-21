@@ -8,11 +8,15 @@ import type {
   IndustryAllocation,
   SectorAllocation,
   PerformanceDataPoint,
-  KPIResponse,
   KPIResponseWithMetadata,
   SnapshotHistoryItem,
+  DiversificationMetrics,
+  VolatilityMetrics,
+  DividendSummary,
   Stock,
   StockFilterCriteria,
+  HistoricalPrice,
+  HistoricalPriceSeriesResponse,
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
@@ -134,6 +138,21 @@ export const analyticsAPI = {
     });
     return response.data;
   },
+
+  getDiversification: async (): Promise<DiversificationMetrics> => {
+    const response = await apiClient.get('/analytics/diversification');
+    return response.data;
+  },
+
+  getVolatility: async (): Promise<VolatilityMetrics> => {
+    const response = await apiClient.get('/analytics/volatility');
+    return response.data;
+  },
+
+  getDividends: async (): Promise<DividendSummary> => {
+    const response = await apiClient.get('/analytics/dividends');
+    return response.data;
+  },
 };
 
 // Stock API
@@ -162,8 +181,9 @@ export const stockAPI = {
     await apiClient.delete(`/stocks/${ticker}`);
   },
 
-  triggerEnrichment: async (ticker: string): Promise<void> => {
-    await apiClient.post(`/stocks/${ticker}/enrich`);
+  triggerEnrichment: async (ticker: string): Promise<Stock> => {
+    const response = await apiClient.post(`/stocks/${ticker}/enrich`);
+    return response.data;
   },
 
   getSectors: async (): Promise<string[]> => {
@@ -196,6 +216,48 @@ export const stockAPI = {
       params: { skip, reason },
     });
     return response.data;
+  },
+
+  // Historical price methods
+  getHistoricalPrices: async (
+    ticker: string,
+    startDate?: string,
+    endDate?: string
+  ): Promise<HistoricalPriceSeriesResponse> => {
+    const response = await apiClient.get(`/stocks/${ticker}/prices`, {
+      params: { start_date: startDate, end_date: endDate },
+    });
+    return response.data;
+  },
+
+  addHistoricalPrice: async (
+    ticker: string,
+    priceDate: string,
+    price: number
+  ): Promise<HistoricalPrice> => {
+    const response = await apiClient.post(`/stocks/${ticker}/prices`, {
+      price_date: priceDate,
+      price: price,
+    });
+    return response.data;
+  },
+
+  updateHistoricalPrice: async (
+    ticker: string,
+    priceDate: string,
+    price: number
+  ): Promise<HistoricalPrice> => {
+    const response = await apiClient.put(`/stocks/${ticker}/prices/${priceDate}`, {
+      price: price,
+    });
+    return response.data;
+  },
+
+  deleteHistoricalPrice: async (
+    ticker: string,
+    priceDate: string
+  ): Promise<void> => {
+    await apiClient.delete(`/stocks/${ticker}/prices/${priceDate}`);
   },
 };
 

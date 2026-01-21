@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { stockAPI } from '../api/client';
 import type { Stock, StockFilterCriteria } from '../types';
 import ManualReviewChat from './ManualReviewChat';
+import StockDetailDialog from './StockDetailDialog';
 
 const StockList = () => {
   const [stocks, setStocks] = useState<Stock[]>([]);
@@ -28,6 +29,12 @@ const StockList = () => {
   // Manual review chat state
   const [showManualReviewChat, setShowManualReviewChat] = useState(false);
   const [manualReviewTicker, setManualReviewTicker] = useState<string | null>(null);
+
+  // Per-stock refresh state
+  const [refreshingTicker, setRefreshingTicker] = useState<string | null>(null);
+
+  // Stock detail dialog state
+  const [detailStock, setDetailStock] = useState<Stock | null>(null);
 
   // Filter options
   const [sectors, setSectors] = useState<string[]>([]);
@@ -145,10 +152,39 @@ const StockList = () => {
   const handleRetryEnrichment = async (ticker: string) => {
     try {
       await stockAPI.triggerEnrichment(ticker);
-      alert('Enrichment triggered. Refresh in a few seconds.');
+      fetchStocks();
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Failed to trigger enrichment');
     }
+  };
+
+  const handleRefreshStock = async (ticker: string) => {
+    if (refreshingTicker) return; // Prevent multiple concurrent refreshes
+
+    setRefreshingTicker(ticker);
+    try {
+      const updatedStock = await stockAPI.triggerEnrichment(ticker);
+      // Update just this stock in the list
+      setStocks((prev) => prev.map((s) => (s.ticker === ticker ? updatedStock : s)));
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to refresh stock data');
+    } finally {
+      setRefreshingTicker(null);
+    }
+  };
+
+  const formatRelativeTime = (dateString: string | null): string => {
+    if (!dateString) return 'Never';
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays}d ago`;
+    if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
+    return date.toLocaleDateString();
   };
 
   const updateEditField = (field: keyof Stock, value: any) => {
@@ -183,6 +219,19 @@ const StockList = () => {
 
   const handleManualReviewResolved = () => {
     // Refresh stocks after manual review completes
+    fetchStocks();
+  };
+
+  const handleOpenDetail = (stock: Stock) => {
+    setDetailStock(stock);
+  };
+
+  const handleCloseDetail = () => {
+    setDetailStock(null);
+  };
+
+  const handleStockUpdated = () => {
+    // Refresh stocks after price edit in detail dialog
     fetchStocks();
   };
 
@@ -296,6 +345,7 @@ const StockList = () => {
               <th>Value</th>
               <th>P&L</th>
               <th>Status</th>
+              <th>Updated</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -380,6 +430,20 @@ const StockList = () => {
                   <td>{getStatusBadge(stock)}</td>
 
                   <td>
+                    <span
+                      className={`last-updated-cell ${refreshingTicker === stock.ticker ? 'refreshing' : ''}`}
+                      onClick={() => handleRefreshStock(stock.ticker)}
+                      title={`Click to refresh data. Last updated: ${stock.last_updated || 'Never'}`}
+                    >
+                      {refreshingTicker === stock.ticker ? (
+                        <span className="refresh-spinner">Refreshing...</span>
+                      ) : (
+                        formatRelativeTime(stock.last_updated)
+                      )}
+                    </span>
+                  </td>
+
+                  <td>
                     {isEditing ? (
                       <div className="edit-actions">
                         <button
@@ -395,6 +459,13 @@ const StockList = () => {
                       </div>
                     ) : (
                       <div className="row-actions">
+                        <button
+                          onClick={() => handleOpenDetail(stock)}
+                          className="detail-btn"
+                          title="View stock details"
+                        >
+                          Details
+                        </button>
                         {canEdit && (
                           <button
                             onClick={() => handleEdit(stock)}
@@ -465,6 +536,15 @@ const StockList = () => {
           ticker={manualReviewTicker}
           onClose={handleCloseManualReview}
           onResolved={handleManualReviewResolved}
+        />
+      )}
+
+      {/* Stock Detail Dialog */}
+      {detailStock && (
+        <StockDetailDialog
+          stock={detailStock}
+          onClose={handleCloseDetail}
+          onStockUpdated={handleStockUpdated}
         />
       )}
     </div>

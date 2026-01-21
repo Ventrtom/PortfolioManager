@@ -3,11 +3,16 @@ Stock Management Routes
 """
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from models.database import get_db
-from models.schemas import StockResponse, StockCreate, StockUpdate
+from models.schemas import (
+    StockResponse, StockCreate, StockUpdate,
+    HistoricalPriceCreate, HistoricalPriceUpdate,
+    HistoricalPriceResponse, HistoricalPriceSeriesResponse
+)
 from services.stock_service import StockService
 from services.enrichment_service import EnrichmentService
+from services.historical_price_service import HistoricalPriceService
 from typing import List, Optional
 
 router = APIRouter()
@@ -24,8 +29,8 @@ def get_stocks(
     limit: int = 100,
     db: Session = Depends(get_db)
 ):
-    """Get all stocks with filtering"""
-    return StockService.get_all_stocks(
+    """Get all stocks with filtering - uses lightweight method for fast loading"""
+    return StockService.get_all_stocks_lightweight(
         db, search, sector, industry, status, has_holdings, skip, limit
     )
 
@@ -104,13 +109,15 @@ def delete_stock(ticker: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/{ticker}/enrich")
+@router.post("/{ticker}/enrich", response_model=StockResponse)
 def trigger_enrichment(
     ticker: str,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
-    """Manually trigger enrichment for a stock"""
+    """
+    Manually trigger enrichment for a stock.
+    Runs synchronously and returns the updated stock data.
+    """
     from models.database import Stock
 
     stock = db.query(Stock).filter(Stock.ticker == ticker).first()
@@ -118,14 +125,20 @@ def trigger_enrichment(
     if not stock:
         raise HTTPException(status_code=404, detail="Stock not found")
 
-    # Trigger enrichment
-    background_tasks.add_task(
-        EnrichmentService.enrich_stock,
-        ticker,
-        db
-    )
+    # Run enrichment synchronously so we can return updated data
+    try:
+        EnrichmentService.enrich_stock(ticker, db)
+    except Exception as e:
+        # Log but don't fail - still return current stock data
+        import logging
+        logging.getLogger(__name__).warning(f"Enrichment failed for {ticker}: {e}")
 
-    return {"message": f"Enrichment triggered for {ticker}"}
+    # Return the updated stock record
+    stocks = StockService.get_all_stocks_lightweight(db, search=ticker, limit=1)
+    if stocks:
+        return stocks[0]
+
+    raise HTTPException(status_code=404, detail="Stock not found after enrichment")
 
 
 @router.get("/filters/sectors")
@@ -221,3 +234,146 @@ def update_skip_price_flag(
         "skip_price_reason": stock.skip_price_reason,
         "skip_price_since": stock.skip_price_since.isoformat() if stock.skip_price_since else None
     }
+
+
+# ============================================================================
+# Historical Price Endpoints
+# ============================================================================
+
+@router.get("/{ticker}/prices", response_model=HistoricalPriceSeriesResponse)
+def get_historical_prices(
+    ticker: str,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Get historical prices for a stock.
+    If dates not provided, defaults to last 1 year.
+    Will auto-populate from yfinance if data is missing.
+    """
+    from models.database import Stock
+
+    # Verify stock exists
+    stock = db.query(Stock).filter(Stock.ticker == ticker).first()
+    if not stock:
+        raise HTTPException(status_code=404, detail="Stock not found")
+
+    # Default to 1 year if no dates provided
+    if end_date is None:
+        end_date = date.today()
+    if start_date is None:
+        start_date = end_date - timedelta(days=365)
+
+    # Ensure we have data populated (will fetch from yfinance if needed)
+    HistoricalPriceService.ensure_prices_for_period([ticker], start_date, end_date, db)
+
+    # Get the price series
+    prices = HistoricalPriceService.get_price_series(ticker, start_date, end_date, db)
+
+    return HistoricalPriceSeriesResponse(
+        ticker=ticker,
+        prices=[
+            HistoricalPriceResponse(ticker=ticker, price_date=d, price=p)
+            for d, p in prices
+        ],
+        count=len(prices)
+    )
+
+
+@router.post("/{ticker}/prices", response_model=HistoricalPriceResponse, status_code=201)
+def add_historical_price(
+    ticker: str,
+    price_data: HistoricalPriceCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    Add a new historical price for a stock.
+    If price already exists for that date, it will be updated.
+    """
+    from models.database import Stock
+
+    # Verify stock exists
+    stock = db.query(Stock).filter(Stock.ticker == ticker).first()
+    if not stock:
+        raise HTTPException(status_code=404, detail="Stock not found")
+
+    is_new, action = HistoricalPriceService.add_or_update_price(
+        ticker,
+        price_data.price_date,
+        price_data.price,
+        db
+    )
+
+    return HistoricalPriceResponse(
+        ticker=ticker,
+        price_date=price_data.price_date,
+        price=price_data.price
+    )
+
+
+@router.put("/{ticker}/prices/{price_date}", response_model=HistoricalPriceResponse)
+def update_historical_price(
+    ticker: str,
+    price_date: date,
+    price_data: HistoricalPriceUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    Update an existing historical price for a specific date.
+    """
+    from models.database import Stock, StockPrice
+
+    # Verify stock exists
+    stock = db.query(Stock).filter(Stock.ticker == ticker).first()
+    if not stock:
+        raise HTTPException(status_code=404, detail="Stock not found")
+
+    # Check if price exists
+    existing = db.query(StockPrice).filter(
+        StockPrice.ticker == ticker,
+        StockPrice.price_date == price_date
+    ).first()
+
+    if not existing:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No price found for {ticker} on {price_date}"
+        )
+
+    # Update the price
+    existing.price = price_data.price
+    db.commit()
+
+    return HistoricalPriceResponse(
+        ticker=ticker,
+        price_date=price_date,
+        price=price_data.price
+    )
+
+
+@router.delete("/{ticker}/prices/{price_date}", status_code=204)
+def delete_historical_price(
+    ticker: str,
+    price_date: date,
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a historical price for a specific date.
+    """
+    from models.database import Stock
+
+    # Verify stock exists
+    stock = db.query(Stock).filter(Stock.ticker == ticker).first()
+    if not stock:
+        raise HTTPException(status_code=404, detail="Stock not found")
+
+    deleted = HistoricalPriceService.delete_price(ticker, price_date, db)
+
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No price found for {ticker} on {price_date}"
+        )
+
+    return None

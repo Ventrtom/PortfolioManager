@@ -95,11 +95,19 @@ class StockResponse(StockBase):
     is_manually_edited: bool
     alternative_symbols: List[str] = []
     last_updated: Optional[str] = None
-    # Portfolio context
+    # Portfolio context - native currency (usually USD)
     holdings_quantity: float = 0
-    holdings_value: float = 0
-    cost_basis: float = 0
-    unrealized_gain: float = 0
+    holdings_value: float = 0  # Market value in native currency
+    cost_basis: float = 0  # Cost basis in native currency
+    unrealized_gain: float = 0  # Unrealized gain in native currency
+    current_price: Optional[float] = None  # Current market price in native currency
+    average_cost: Optional[float] = None  # Average cost per share in native currency
+    # Portfolio context - CZK (base currency for display)
+    current_price_czk: Optional[float] = None  # Current price converted to CZK
+    holdings_value_czk: float = 0  # Market value in CZK
+    cost_basis_czk: float = 0  # Cost basis in CZK (at transaction dates)
+    unrealized_gain_czk: float = 0  # Unrealized gain in CZK
+    average_cost_czk: Optional[float] = None  # Average cost per share in CZK
     # Price fetch skip flags
     skip_price_fetch: bool = False
     skip_price_reason: Optional[str] = None
@@ -272,3 +280,28 @@ class CurrencyRefreshResponse(BaseModel):
     updated: int
     failed: int
     errors: List[str] = []
+
+
+# Historical Price schemas
+class HistoricalPriceCreate(BaseModel):
+    price_date: date
+    price: float = Field(..., gt=0, description="Price must be positive")
+
+
+class HistoricalPriceUpdate(BaseModel):
+    price: float = Field(..., gt=0, description="Price must be positive")
+
+
+class HistoricalPriceResponse(BaseModel):
+    ticker: str
+    price_date: date
+    price: float
+
+    class Config:
+        from_attributes = True
+
+
+class HistoricalPriceSeriesResponse(BaseModel):
+    ticker: str
+    prices: List[HistoricalPriceResponse]
+    count: int

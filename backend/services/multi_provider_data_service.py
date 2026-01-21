@@ -2,9 +2,10 @@
 Multi-Provider Market Data Service
 Supports multiple data sources with automatic fallback:
 1. yfinance (Yahoo Finance) - Primary, free, no API key needed
-2. Alpha Vantage - Free tier: 25 requests/day
-3. Finnhub - Free tier: 60 calls/minute
-4. Financial Modeling Prep - Free tier: 250 requests/day
+2. EOD Historical Data - Great for international ETFs (free tier: 20 calls/day)
+3. Alpha Vantage - Free tier: 25 requests/day
+4. Finnhub - Free tier: 60 calls/minute
+5. Financial Modeling Prep - Free tier: 250 requests/day
 """
 
 import yfinance as yf
@@ -310,6 +311,134 @@ class FinancialModelingPrepProvider(DataProvider):
             return None
 
 
+class EODHistoricalDataProvider(DataProvider):
+    """
+    EOD Historical Data API provider
+    Excellent for international ETFs and stocks (has direct LSE contract)
+    Free tier: 20 API calls/day
+    """
+
+    def __init__(self, api_key: Optional[str] = None):
+        super().__init__("EODHD", api_key or os.getenv("EODHD_API_KEY"))
+        self.base_url = "https://eodhd.com/api"
+        self.daily_limit = 20  # Free tier limit
+        self.min_request_interval = 1.0  # 1 second between requests
+
+    def can_make_request(self) -> bool:
+        if not self.api_key:
+            return False
+
+        # Check daily limit
+        if self.request_count >= self.daily_limit:
+            if self.rate_limit_reset and datetime.now() < self.rate_limit_reset:
+                return False
+            else:
+                self.request_count = 0
+                self.rate_limit_reset = None
+
+        if self.last_request_time:
+            elapsed = time.time() - self.last_request_time
+            if elapsed < self.min_request_interval:
+                time.sleep(self.min_request_interval - elapsed)
+
+        return True
+
+    def _convert_ticker_format(self, ticker: str) -> str:
+        """
+        Convert ticker to EODHD format
+        Yahoo Finance uses .L for London, EODHD uses .LSE
+        """
+        # Map common suffixes to EODHD exchange codes
+        suffix_map = {
+            '.L': '.LSE',       # London Stock Exchange
+            '.UK': '.LSE',      # UK variant -> LSE
+            '.LON': '.LSE',     # London variant -> LSE
+            '.PA': '.PA',       # Paris (same)
+            '.DE': '.XETRA',    # Frankfurt/Xetra
+            '.F': '.XETRA',     # Frankfurt variant
+            '.AS': '.AS',       # Amsterdam (same)
+            '.MI': '.MI',       # Milan (same)
+            '.SW': '.SW',       # Swiss (same)
+        }
+
+        ticker_upper = ticker.upper()
+        for yahoo_suffix, eodhd_suffix in suffix_map.items():
+            if ticker_upper.endswith(yahoo_suffix.upper()):
+                base = ticker[:-len(yahoo_suffix)]
+                return f"{base}{eodhd_suffix}"
+
+        # If no recognized suffix, assume US stock
+        if '.' not in ticker:
+            return f"{ticker}.US"
+
+        return ticker
+
+    def get_stock_info(self, ticker: str) -> Optional[Dict]:
+        """Fetch stock/ETF info from EOD Historical Data"""
+        try:
+            if not self.can_make_request():
+                logger.debug(f"{self.name}: Rate limited, skipping {ticker}")
+                return None
+
+            self.last_request_time = time.time()
+            self.request_count += 1
+
+            # Convert ticker format
+            eodhd_ticker = self._convert_ticker_format(ticker)
+
+            # Get fundamentals (includes profile data)
+            url = f"{self.base_url}/fundamentals/{eodhd_ticker}"
+            params = {
+                "api_token": self.api_key,
+                "fmt": "json"
+            }
+
+            response = requests.get(url, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+
+            # Check for errors
+            if isinstance(data, dict) and data.get("error"):
+                logger.warning(f"{self.name}: API error for {ticker}: {data.get('error')}")
+                return None
+
+            # Extract general info
+            general = data.get("General", {})
+            if not general:
+                logger.warning(f"{self.name}: No general data for {ticker}")
+                return None
+
+            company_name = general.get("Name")
+            if not company_name:
+                logger.warning(f"{self.name}: No company name for {ticker}")
+                return None
+
+            # Extract highlights for market cap
+            highlights = data.get("Highlights", {})
+
+            logger.info(f"{self.name}: Successfully fetched {ticker} (as {eodhd_ticker})")
+            return {
+                "ticker": ticker,  # Return original ticker
+                "company_name": company_name,
+                "sector": general.get("Sector"),
+                "industry": general.get("Industry"),
+                "currency": general.get("CurrencyCode", "USD"),
+                "market_cap": highlights.get("MarketCapitalization"),
+                "volume": None,  # Would need separate quote call
+                "provider": self.name
+            }
+
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                logger.warning(f"{self.name}: Ticker not found: {ticker}")
+            else:
+                logger.error(f"{self.name}: HTTP error for {ticker}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"{self.name}: Error fetching {ticker}: {e}")
+            return None
+
+
 class MultiProviderDataService:
     """
     Service that tries multiple data providers in sequence until one succeeds
@@ -320,6 +449,7 @@ class MultiProviderDataService:
         # Initialize all providers
         self.providers: List[DataProvider] = [
             YFinanceProvider(),
+            EODHistoricalDataProvider(),  # Great for international ETFs
             AlphaVantageProvider(),
             FinnhubProvider(),
             FinancialModelingPrepProvider(),

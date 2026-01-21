@@ -92,8 +92,18 @@ const ManualReviewChat = ({ ticker, onClose, onResolved }: ManualReviewChatProps
       };
       setMessages((prev) => [...prev, aiMessage]);
 
-      // Update suggested actions
-      setSuggestedActions(response.data.suggested_actions || []);
+      // Check if AI executed a save action
+      if (response.data.executed_action?.type === 'save_mapping') {
+        // AI successfully saved the mapping - clear actions and close after delay
+        setSuggestedActions([]);
+        setTimeout(() => {
+          onResolved();
+          onClose();
+        }, 2000);
+      } else {
+        // Update suggested actions for normal responses
+        setSuggestedActions(response.data.suggested_actions || []);
+      }
     } catch (error: any) {
       console.error('Chat error:', error);
       const errorMessage: Message = {

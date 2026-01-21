@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
 import { portfolioAPI, analyticsAPI } from '../api/client';
-import type { PortfolioSummary, Holding, IndustryAllocation, KPIResponseWithMetadata, Currency } from '../types';
+import type { PortfolioSummary, Holding, IndustryAllocation, KPIResponseWithMetadata, WidgetLoadingState } from '../types';
 import { formatCurrency } from '../utils/formatters';
 import HoldingsTable from './HoldingsTable';
 import AllocationChart from './AllocationChart';
 import PortfolioSummaryCard from './PortfolioSummaryCard';
-import CurrencySelector from './shared/CurrencySelector';
 
 const Dashboard = () => {
   const [summary, setSummary] = useState<PortfolioSummary | null>(null);
@@ -15,7 +14,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isRecalculating, setIsRecalculating] = useState(false);
-  const [selectedCurrency, setSelectedCurrency] = useState<Currency>('CZK');
+  const [widgetLoading, setWidgetLoading] = useState<WidgetLoadingState>({});
 
   const fetchData = async () => {
     try {
@@ -24,7 +23,7 @@ const Dashboard = () => {
 
       // Only load cached KPIs on initial dashboard load (fast)
       // Holdings and allocation will be loaded on manual refresh
-      const kpisData = await analyticsAPI.getKPIs(selectedCurrency);
+      const kpisData = await analyticsAPI.getKPIs('CZK');
       setKPIs(kpisData);
 
       // Derive summary from KPIs to avoid redundant calculations
@@ -45,8 +44,8 @@ const Dashboard = () => {
       setError(null);
 
       const recalculatedKPIs = await analyticsAPI.recalculateKPIs();
-      // After recalculation (always in CZK), fetch in selected currency
-      const convertedKPIs = await analyticsAPI.getKPIs(selectedCurrency);
+      // After recalculation, fetch fresh KPIs in CZK
+      const convertedKPIs = await analyticsAPI.getKPIs('CZK');
       setKPIs(convertedKPIs);
 
       // Also refresh other dashboard data
@@ -67,28 +66,88 @@ const Dashboard = () => {
     }
   };
 
+  // Individual widget refresh handlers
+  const handleRefreshSummary = async () => {
+    setWidgetLoading(prev => ({ ...prev, summary: true }));
+    try {
+      const summaryData = await portfolioAPI.getSummary();
+      setSummary(summaryData);
+    } catch (err) {
+      console.error('Failed to refresh summary:', err);
+    } finally {
+      setWidgetLoading(prev => ({ ...prev, summary: false }));
+    }
+  };
+
+  const handleRefreshDiversification = async () => {
+    setWidgetLoading(prev => ({ ...prev, diversification: true }));
+    try {
+      const data = await analyticsAPI.getDiversification();
+      if (kpis) {
+        setKPIs({ ...kpis, diversification: data });
+      }
+    } catch (err) {
+      console.error('Failed to refresh diversification:', err);
+    } finally {
+      setWidgetLoading(prev => ({ ...prev, diversification: false }));
+    }
+  };
+
+  const handleRefreshVolatility = async () => {
+    setWidgetLoading(prev => ({ ...prev, volatility: true }));
+    try {
+      const data = await analyticsAPI.getVolatility();
+      if (kpis) {
+        setKPIs({ ...kpis, volatility: data });
+      }
+    } catch (err) {
+      console.error('Failed to refresh volatility:', err);
+    } finally {
+      setWidgetLoading(prev => ({ ...prev, volatility: false }));
+    }
+  };
+
+  const handleRefreshDividends = async () => {
+    setWidgetLoading(prev => ({ ...prev, dividends: true }));
+    try {
+      const data = await analyticsAPI.getDividends();
+      if (kpis) {
+        setKPIs({ ...kpis, dividends: data });
+      }
+    } catch (err) {
+      console.error('Failed to refresh dividends:', err);
+    } finally {
+      setWidgetLoading(prev => ({ ...prev, dividends: false }));
+    }
+  };
+
+  const handleRefreshHoldings = async () => {
+    setWidgetLoading(prev => ({ ...prev, holdings: true }));
+    try {
+      const holdingsData = await portfolioAPI.getHoldings();
+      setHoldings(holdingsData);
+    } catch (err) {
+      console.error('Failed to refresh holdings:', err);
+    } finally {
+      setWidgetLoading(prev => ({ ...prev, holdings: false }));
+    }
+  };
+
+  const handleRefreshAllocation = async () => {
+    setWidgetLoading(prev => ({ ...prev, allocation: true }));
+    try {
+      const allocationData = await portfolioAPI.getIndustryAllocation();
+      setAllocation(allocationData);
+    } catch (err) {
+      console.error('Failed to refresh allocation:', err);
+    } finally {
+      setWidgetLoading(prev => ({ ...prev, allocation: false }));
+    }
+  };
+
   useEffect(() => {
     fetchData();
   }, []);
-
-  // Refetch KPIs when currency changes
-  useEffect(() => {
-    if (!loading && kpis) {
-      const refetchKPIs = async () => {
-        try {
-          const kpisData = await analyticsAPI.getKPIs(selectedCurrency);
-          setKPIs(kpisData);
-          // Update summary from the new KPIs
-          if (kpisData.portfolio_summary) {
-            setSummary(kpisData.portfolio_summary);
-          }
-        } catch (err) {
-          console.error('Error fetching KPIs in new currency:', err);
-        }
-      };
-      refetchKPIs();
-    }
-  }, [selectedCurrency]);
 
   if (loading) {
     return <div className="loading">Loading portfolio data...</div>;
@@ -108,10 +167,6 @@ const Dashboard = () => {
       <div className="dashboard-header">
         <h1>Portfolio Dashboard</h1>
         <div className="dashboard-actions">
-          <CurrencySelector
-            value={selectedCurrency}
-            onChange={setSelectedCurrency}
-          />
           {kpis?.metadata && (
             <span className="last-updated">
               Last updated: {new Date(kpis.metadata.calculated_at).toLocaleString()}
@@ -125,43 +180,64 @@ const Dashboard = () => {
             disabled={isRecalculating}
             className="refresh-button"
           >
-            {isRecalculating ? 'Recalculating...' : 'Refresh Data'}
+            {isRecalculating ? 'Recalculating...' : 'Refresh All'}
           </button>
         </div>
       </div>
 
-      {kpis?.portfolio_summary?.conversion_warnings && (
-        <div className="conversion-warning">
-          <strong>⚠️ Exchange Rate Warning:</strong>
-          <ul>
-            {kpis.portfolio_summary.conversion_warnings.map((warning, idx) => (
-              <li key={idx}>{warning}</li>
-            ))}
-          </ul>
+      {summary && (
+        <div className="widget-section">
+          <div className="widget-header">
+            <h2>Portfolio Summary</h2>
+            <button
+              onClick={handleRefreshSummary}
+              disabled={widgetLoading.summary}
+              className="widget-refresh-btn"
+            >
+              {widgetLoading.summary ? 'Refreshing...' : 'Refresh'}
+            </button>
+          </div>
+          <PortfolioSummaryCard summary={summary} kpis={kpis} currency="CZK" />
         </div>
       )}
 
-      {summary && <PortfolioSummaryCard summary={summary} kpis={kpis} currency={selectedCurrency} />}
-
       <div className="dashboard-grid">
         <div className="holdings-section">
-          <h2>Current Holdings</h2>
+          <div className="widget-header">
+            <h2>Current Holdings</h2>
+            <button
+              onClick={handleRefreshHoldings}
+              disabled={widgetLoading.holdings}
+              className="widget-refresh-btn"
+            >
+              {widgetLoading.holdings ? 'Refreshing...' : 'Refresh'}
+            </button>
+          </div>
           {holdings.length > 0 ? (
             <HoldingsTable holdings={holdings} />
           ) : (
             <div className="no-data">
-              <p>Click "Refresh Data" to load detailed holdings with current prices</p>
+              <p>Click "Refresh" to load detailed holdings with current prices</p>
             </div>
           )}
         </div>
 
         <div className="allocation-section">
-          <h2>Industry Allocation</h2>
+          <div className="widget-header">
+            <h2>Industry Allocation</h2>
+            <button
+              onClick={handleRefreshAllocation}
+              disabled={widgetLoading.allocation}
+              className="widget-refresh-btn"
+            >
+              {widgetLoading.allocation ? 'Refreshing...' : 'Refresh'}
+            </button>
+          </div>
           {allocation.length > 0 ? (
             <AllocationChart data={allocation} />
           ) : (
             <div className="no-data">
-              <p>Click "Refresh Data" to load allocation data</p>
+              <p>Click "Refresh" to load allocation data</p>
             </div>
           )}
         </div>
@@ -170,7 +246,16 @@ const Dashboard = () => {
       {kpis && (
         <div className="kpis-grid">
           <div className="kpi-card">
-            <h3>Diversification</h3>
+            <div className="kpi-card-header">
+              <h3>Diversification</h3>
+              <button
+                onClick={handleRefreshDiversification}
+                disabled={widgetLoading.diversification}
+                className="widget-refresh-btn"
+              >
+                {widgetLoading.diversification ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
             <div className="kpi-content">
               <p>Holdings: {kpis.diversification.number_of_holdings}</p>
               <p>Sectors: {kpis.diversification.number_of_sectors}</p>
@@ -180,7 +265,16 @@ const Dashboard = () => {
           </div>
 
           <div className="kpi-card">
-            <h3>Volatility</h3>
+            <div className="kpi-card-header">
+              <h3>Volatility</h3>
+              <button
+                onClick={handleRefreshVolatility}
+                disabled={widgetLoading.volatility}
+                className="widget-refresh-btn"
+              >
+                {widgetLoading.volatility ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
             <div className="kpi-content">
               <p>Daily: {(kpis.volatility.daily_volatility * 100).toFixed(2)}%</p>
               <p>Annualized: {(kpis.volatility.annualized_volatility * 100).toFixed(2)}%</p>
@@ -191,10 +285,19 @@ const Dashboard = () => {
           </div>
 
           <div className="kpi-card">
-            <h3>Dividends</h3>
+            <div className="kpi-card-header">
+              <h3>Dividends</h3>
+              <button
+                onClick={handleRefreshDividends}
+                disabled={widgetLoading.dividends}
+                className="widget-refresh-btn"
+              >
+                {widgetLoading.dividends ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
             <div className="kpi-content">
-              <p>Total: {formatCurrency(kpis.dividends.total_dividends, kpis.portfolio_summary.currency || 'CZK')}</p>
-              <p>Annual Income: {formatCurrency(kpis.dividends.annual_dividend_income, kpis.portfolio_summary.currency || 'CZK')}</p>
+              <p>Total: {formatCurrency(kpis.dividends.total_dividends, 'CZK')}</p>
+              <p>Annual Income: {formatCurrency(kpis.dividends.annual_dividend_income, 'CZK')}</p>
               <p>Yield: {kpis.dividends.dividend_yield.toFixed(2)}%</p>
             </div>
           </div>

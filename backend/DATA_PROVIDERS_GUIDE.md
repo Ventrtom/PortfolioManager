@@ -11,9 +11,10 @@ The Portfolio Manager uses a **multi-provider fallback system** to fetch stock m
 When enriching stock data, the system tries providers in this order:
 
 1. **yfinance (Yahoo Finance)** - Primary provider, no API key needed
-2. **Alpha Vantage** - Free tier fallback (if API key provided)
-3. **Finnhub** - Free tier fallback (if API key provided)
-4. **Financial Modeling Prep** - Free tier fallback (if API key provided)
+2. **EOD Historical Data** - Excellent for international ETFs (if API key provided)
+3. **Alpha Vantage** - Free tier fallback (if API key provided)
+4. **Finnhub** - Free tier fallback (if API key provided)
+5. **Financial Modeling Prep** - Free tier fallback (if API key provided)
 
 **If one provider fails, the system automatically tries the next one.**
 
@@ -22,6 +23,7 @@ When enriching stock data, the system tries providers in this order:
 Each provider has built-in rate limiting to prevent API abuse:
 
 - **yfinance**: 500ms between requests
+- **EOD Historical Data**: 1 second between requests (free tier: 20/day)
 - **Alpha Vantage**: 12 seconds between requests (free tier: 25/day)
 - **Finnhub**: 1 second between requests (free tier: 60/minute)
 - **Financial Modeling Prep**: 500ms between requests (free tier: 250/day)
@@ -42,7 +44,17 @@ Each provider has built-in rate limiting to prevent API abuse:
 
 For improved reliability when Yahoo Finance is rate limited, add free API keys for backup providers:
 
-#### 1. Alpha Vantage (25 requests/day)
+#### 1. EOD Historical Data (20 requests/day) - Recommended for International ETFs
+
+```bash
+# Get free API key from: https://eodhd.com/register
+# Add to backend/.env:
+EODHD_API_KEY=your-key-here
+```
+
+**Why use it:** Excellent coverage for UK and European ETFs (e.g., IUIT.UK, ISF.L). Has direct contracts with the London Stock Exchange for accurate data.
+
+#### 2. Alpha Vantage (25 requests/day)
 
 ```bash
 # Get free API key from: https://www.alphavantage.co/support/#api-key
@@ -52,7 +64,7 @@ ALPHA_VANTAGE_API_KEY=your-key-here
 
 **Why use it:** Good for occasional lookups when Yahoo Finance is down
 
-#### 2. Finnhub (60 calls/minute)
+#### 3. Finnhub (60 calls/minute)
 
 ```bash
 # Get free API key from: https://finnhub.io/register
@@ -62,7 +74,7 @@ FINNHUB_API_KEY=your-key-here
 
 **Why use it:** High rate limit for bulk operations
 
-#### 3. Financial Modeling Prep (250 requests/day)
+#### 4. Financial Modeling Prep (250 requests/day)
 
 ```bash
 # Get free API key from: https://site.financialmodelingprep.com/developer/docs/
@@ -105,6 +117,7 @@ cp backend/.env.example backend/.env
 ANTHROPIC_API_KEY=sk-ant-your-key
 
 # Optional: Backup data providers
+EODHD_API_KEY=your-eodhd-key
 ALPHA_VANTAGE_API_KEY=your-av-key
 FINNHUB_API_KEY=your-finnhub-key
 FMP_API_KEY=your-fmp-key
@@ -117,7 +130,7 @@ FMP_API_KEY=your-fmp-key
 The system logs which providers are active on startup:
 
 ```
-INFO:services.multi_provider_data_service:Initialized MultiProviderDataService with 4 active providers: ['yfinance', 'AlphaVantage', 'Finnhub', 'FMP']
+INFO:services.multi_provider_data_service:Initialized MultiProviderDataService with 5 active providers: ['yfinance', 'EODHD', 'AlphaVantage', 'Finnhub', 'FMP']
 ```
 
 ### Test Stock Enrichment
@@ -147,6 +160,7 @@ INFO:services.multi_provider_data_service:✓ Successfully fetched AAPL from Alp
 | Provider | Free Tier Limit | API Key Required | Best For |
 |----------|----------------|------------------|----------|
 | **yfinance** | Unlimited* | No | Daily use, bulk operations |
+| **EODHD** | 20/day | Yes | International ETFs (UK, EU) |
 | **Alpha Vantage** | 25/day | Yes | Occasional fallback |
 | **Finnhub** | 60/minute | Yes | High-volume periods |
 | **FMP** | 250/day | Yes | Regular fallback |
@@ -160,7 +174,7 @@ INFO:services.multi_provider_data_service:✓ Successfully fetched AAPL from Alp
 **Symptom:** `429 Client Error: Too Many Requests`
 
 **Solutions:**
-1. Add backup API keys (Alpha Vantage, Finnhub, FMP)
+1. Add backup API keys (EODHD, Alpha Vantage, Finnhub, FMP)
 2. Wait 15 minutes for yfinance rate limits to reset
 3. System automatically switches to backup providers
 
@@ -203,8 +217,11 @@ INFO:services.multi_provider_data_service:✓ Successfully fetched AAPL from Alp
 - Add Alpha Vantage OR Finnhub for backup
 
 **Heavy usage (50+ stocks/day):**
-- Add all providers (Alpha Vantage + Finnhub + FMP)
+- Add all providers (EODHD + Alpha Vantage + Finnhub + FMP)
 - Consider paid API tiers for higher limits
+
+**International ETFs (UK, EU):**
+- Add EODHD for best coverage of London Stock Exchange and European markets
 
 ## Data Provider Details
 
@@ -212,6 +229,12 @@ INFO:services.multi_provider_data_service:✓ Successfully fetched AAPL from Alp
 - **Pros:** Free, no API key, comprehensive data
 - **Cons:** Subject to rate limiting, unofficial API
 - **Data:** Company info, prices, volume, market cap, sector, industry
+
+### EOD Historical Data (EODHD)
+- **Pros:** Excellent international coverage, direct LSE contract, ETF-specialized
+- **Cons:** Low free tier limit (20/day)
+- **Data:** Company profiles, fundamentals, supports UK/EU ETFs (IUIT.L, ISF.L)
+- **Ticker format:** Uses exchange codes (e.g., IUIT.LSE for London)
 
 ### Alpha Vantage
 - **Pros:** Official API, reliable

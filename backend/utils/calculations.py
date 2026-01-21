@@ -122,11 +122,72 @@ class FinancialCalculations:
                 # Preserve transaction_id if it exists (for FIFO lot tracking)
                 if 'transaction_id' in purchase:
                     partial_purchase['transaction_id'] = purchase['transaction_id']
+                # Preserve cost_czk if it exists (for CZK cost tracking)
+                if 'cost_czk' in purchase:
+                    # Proportional CZK cost for remaining shares
+                    remaining_ratio = (purchase['quantity'] - remaining_quantity) / purchase['quantity']
+                    partial_purchase['cost_czk'] = purchase['cost_czk'] * remaining_ratio
                 remaining_purchases.append(partial_purchase)
                 remaining_quantity = 0
 
         cost_basis = total_cost
         return cost_basis, remaining_purchases
+
+    @staticmethod
+    def calculate_fifo_cost_basis_czk(purchases: List[Dict], quantity_to_sell: float) -> tuple:
+        """
+        Calculate cost basis in CZK using FIFO (First In, First Out) method.
+        Returns (cost_basis_czk, remaining_purchases)
+
+        This version tracks CZK cost (normalized at transaction date) instead of
+        native currency cost, which is essential for correct multi-currency
+        portfolio calculations.
+
+        purchases: List of dicts with 'quantity', 'price', and 'cost_czk' keys
+                   'cost_czk' is the CZK-normalized cost for the entire lot
+        quantity_to_sell: Number of shares to sell
+        """
+        total_cost_czk = 0.0
+        remaining_quantity = quantity_to_sell
+        remaining_purchases = []
+
+        for purchase in purchases:
+            if remaining_quantity <= 0:
+                remaining_purchases.append(purchase.copy())
+                continue
+
+            # Get CZK cost per share for this lot
+            lot_quantity = purchase['quantity']
+            lot_cost_czk = purchase.get('cost_czk', 0)
+            cost_per_share_czk = lot_cost_czk / lot_quantity if lot_quantity > 0 else 0
+
+            if lot_quantity <= remaining_quantity:
+                # Use entire purchase
+                total_cost_czk += lot_cost_czk
+                remaining_quantity -= lot_quantity
+            else:
+                # Use partial purchase
+                used_quantity = remaining_quantity
+                used_cost_czk = cost_per_share_czk * used_quantity
+                total_cost_czk += used_cost_czk
+
+                # Keep the unused portion
+                remaining_lot_quantity = lot_quantity - used_quantity
+                remaining_lot_cost_czk = cost_per_share_czk * remaining_lot_quantity
+
+                partial_purchase = {
+                    'quantity': remaining_lot_quantity,
+                    'price': purchase['price'],
+                    'cost_czk': remaining_lot_cost_czk,
+                    'date': purchase['date']
+                }
+                # Preserve transaction_id if it exists
+                if 'transaction_id' in purchase:
+                    partial_purchase['transaction_id'] = purchase['transaction_id']
+                remaining_purchases.append(partial_purchase)
+                remaining_quantity = 0
+
+        return total_cost_czk, remaining_purchases
 
     @staticmethod
     def calculate_returns(initial_value: float, final_value: float) -> Dict:

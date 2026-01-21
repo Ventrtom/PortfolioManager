@@ -295,3 +295,61 @@ class HistoricalPriceService:
         ).order_by(StockPrice.price_date.asc()).all()
 
         return [(p.price_date, p.price) for p in prices]
+
+    @staticmethod
+    def add_or_update_price(
+        ticker: str,
+        price_date: date,
+        price: float,
+        db: Session
+    ) -> Tuple[bool, str]:
+        """
+        Add or update a single price entry.
+
+        Args:
+            ticker: Stock ticker
+            price_date: Date for the price
+            price: Price value
+            db: Database session
+
+        Returns:
+            Tuple of (is_new, action) where action is 'created' or 'updated'
+        """
+        existing = db.query(StockPrice).filter(
+            StockPrice.ticker == ticker,
+            StockPrice.price_date == price_date
+        ).first()
+
+        if existing:
+            existing.price = price
+            db.commit()
+            return (False, "updated")
+        else:
+            new_price = StockPrice(
+                ticker=ticker,
+                price=price,
+                price_date=price_date
+            )
+            db.add(new_price)
+            db.commit()
+            return (True, "created")
+
+    @staticmethod
+    def delete_price(ticker: str, price_date: date, db: Session) -> bool:
+        """
+        Delete a price entry.
+
+        Args:
+            ticker: Stock ticker
+            price_date: Date of the price to delete
+            db: Database session
+
+        Returns:
+            True if deleted, False if not found
+        """
+        result = db.query(StockPrice).filter(
+            StockPrice.ticker == ticker,
+            StockPrice.price_date == price_date
+        ).delete()
+        db.commit()
+        return result > 0

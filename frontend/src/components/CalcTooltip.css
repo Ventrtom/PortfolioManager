@@ -1,0 +1,69 @@
+/* Calculation Tooltip Styles */
+.calc-tooltip-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: help;
+}
+
+.calc-tooltip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  background: #e5e7eb;
+  color: #6b7280;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.calc-tooltip-wrapper:hover .calc-tooltip-icon {
+  background: #3b82f6;
+  color: white;
+}
+
+.calc-tooltip-content {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1f2937;
+  color: white;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  min-width: 200px;
+  max-width: 400px;
+}
+
+.calc-tooltip-content::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: #1f2937;
+}
+
+.calc-formula {
+  font-weight: 600;
+  color: #93c5fd;
+  margin-bottom: 6px;
+  white-space: normal;
+}
+
+.calc-calculation {
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  color: #d1d5db;
+  font-size: 0.8rem;
+  white-space: normal;
+  word-break: break-word;
+}
