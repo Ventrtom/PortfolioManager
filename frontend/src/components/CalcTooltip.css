@@ -5,18 +5,20 @@
   align-items: center;
   gap: 4px;
   cursor: help;
+  max-width: 100%;
 }
 
 .calc-tooltip-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
   background: #e5e7eb;
   color: #6b7280;
   border-radius: 50%;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   flex-shrink: 0;
 }
