@@ -158,9 +158,8 @@
 /* Summary Cards */
 .summary-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 1rem;
-  overflow: hidden;
 }
 
 .summary-card {
@@ -168,8 +167,10 @@
   padding: 1.25rem;
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-  min-width: 0; /* Allow card to shrink below content size */
-  overflow: hidden;
+  min-width: 0;
+  /* Allow tooltips to overflow the card */
+  overflow: visible;
+  position: relative;
 }
 
 .summary-card h3 {
@@ -180,24 +181,16 @@
 }
 
 .value-large {
-  font-size: clamp(1.25rem, 2.5vw, 1.75rem);
+  font-size: clamp(1.1rem, 2vw, 1.5rem);
   font-weight: bold;
   margin: 0.5rem 0;
-  word-break: break-word;
-  overflow-wrap: break-word;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.25rem;
+  white-space: nowrap;
 }
 
 .value-small {
   font-size: 0.8rem;
   color: #6b7280;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.25rem;
+  white-space: nowrap;
 }
 
 /* Dashboard Grid */
@@ -1593,17 +1586,23 @@ tr:hover {
 }
 
 /* Responsive */
-@media (max-width: 1200px) {
+@media (max-width: 1400px) {
   .summary-cards {
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  }
-
-  .value-large {
-    font-size: clamp(1.1rem, 2vw, 1.5rem);
+    grid-template-columns: repeat(4, 1fr);
   }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 1100px) {
+  .summary-cards {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .value-large {
+    font-size: clamp(1rem, 1.8vw, 1.3rem);
+  }
+}
+
+@media (max-width: 850px) {
   .dashboard-grid {
     grid-template-columns: 1fr;
   }
@@ -1617,7 +1616,7 @@ tr:hover {
   }
 
   .value-large {
-    font-size: 1.1rem;
+    font-size: 1rem;
   }
 
   .nl-header {
@@ -1644,12 +1643,12 @@ tr:hover {
   }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 500px) {
   .summary-cards {
     grid-template-columns: 1fr;
   }
 
   .value-large {
-    font-size: 1.25rem;
+    font-size: 1.1rem;
   }
 }
